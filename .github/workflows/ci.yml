@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Avoid running multiple CI jobs concurrently on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------
+  # Lint + format checks (fast)
+  # ---------------------------------------------------------------
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - run: ruff check rcps tests
+
+  # ---------------------------------------------------------------
+  # Tests that do NOT require iso2mesh / scikit-image / trimesh.
+  # These run on every Python version we support.
+  # ---------------------------------------------------------------
+  unit:
+    name: unit (py${{ matrix.py }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        py: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
+      - name: Install lightweight deps only
+        run: |
+          pip install --upgrade pip
+          pip install numpy scipy pyyaml pytest pytest-cov
+      - name: Run sandbox-safe tests
+        # Skip the heavy e2e + mesh integration tests on the lightweight matrix.
+        run: |
+          pytest tests \
+            --ignore=tests/test_pipeline_e2e.py \
+            -k "not TestRepairAndFinalize and not TestMeshSkimage and not TestMeshIso2mesh and not TestPipelineRunSkimage and not TestPipelineRunIso2Mesh and not TestWrite3mf" \
+            -v
+
+  # ---------------------------------------------------------------
+  # Full-stack tests with all meshing deps. Runs on Ubuntu only.
+  # The MATLAB-vs-Python tests auto-skip if reference.3mf isn't present.
+  # ---------------------------------------------------------------
+  integration:
+    name: integration (py3.11 + iso2mesh + pymeshfix + trimesh + skimage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install full dependency stack
+        run: |
+          pip install --upgrade pip
+          pip install -e ".[dev,viz,skimage]"
+      - name: Run all tests (excluding the slow tier)
+        # The slow tier (the ~80 min full-resolution comparison run and the
+        # 2x2x1 facility e2e) is for local validation; CI covers everything
+        # else, including the coarse-vox e2e and the pore partition test.
+        run: pytest tests -v -m "not slow" --durations=20
+      - name: Upload e2e artefacts (mesh outputs)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-artefacts
+          path: |
+            /tmp/pytest-of-*/pytest-*/*/e2e_test*
+          retention-days: 7

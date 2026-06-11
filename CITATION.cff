@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use rcps-3dprint in your research, please cite it as below."
+title: "rcps-3dprint: reproducible random close-packed sphere lattices for 3D-printable porous-media experiments"
+abstract: >
+  An open-source Python pipeline that converts a random close-packed monodisperse
+  sphere configuration (packing.xyzd from Baranau's packing-generation) into a
+  printable 3MF mesh of spheres connected by cylindrical bridges or by sphere-
+  diameter expansion. Designed for fluid-dynamics experiments in porous media
+  (e.g., Horton-Rogers-Lapwood configuration) where reproducible packings are
+  required and pouring glass beads is not viable.
+type: software
+version: 0.1.0
+date-released: 2026-07-15
+license: MIT
+repository-code: "https://github.com/VladGiurgiu0/rcps-3dprint"
+url: "https://github.com/VladGiurgiu0/rcps-3dprint"
+keywords:
+  - porous-media
+  - sphere-packing
+  - 3d-printing
+  - additive-manufacturing
+  - permeability
+  - darcy-flow
+  - horton-rogers-lapwood
+authors:
+  - family-names: Giurgiu
+    given-names: Vlad
+    email: vladgiurgiubv@me.com
+# doi: 10.5281/zenodo.XXXXXXX     # Zenodo will mint this on first GitHub release
+# preferred-citation:
+#   type: article
+#   ...                             # to be added when a journal paper accompanies the release

@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+.python-version
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts of the pipeline (large, regenerable)
+*.3mf
+*.stl
+*.raw
+*.raw.gz
+*.nhdr
+*_F_nxnyz.raw
+*_meta.txt
+*_info.txt
+*.config.json
+
+# Exception: keep the example reference packing
+!data_example/packing.xyzd
+!data_example/packing.nfo
+# NOTE: tests/fixtures/reference.3mf (~222 MB) is deliberately NOT tracked —
+# GitHub rejects files >100 MB. Regenerate via tests/fixtures/generate_reference.m
+# (tests auto-skip when it is absent); optionally publish via Zenodo later.
+
+# Local scratch / review staging / private tracking
+output/
+_trash_review/
+TODO.md
+
+# rcps-gui working data (flat layout: runs in output/, generator clone,
+# per-folder GUI state)
+rcps_project/
+packing-generation/
+.rcps_gui_state.json
+
+# Jupyter
+.ipynb_checkpoints/
+
+# MATLAB
+*.asv
+*.mex*

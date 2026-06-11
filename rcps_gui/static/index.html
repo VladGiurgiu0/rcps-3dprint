@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RCPS — printable sphere packings</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-dot"></div>
+    <div>
+      <h1>RCPS</h1>
+      <p>packing → mesh → print</p>
+    </div>
+  </div>
+  <div class="run-chip" id="run-chip" title="Active run folder under output/ — switch between runs or start a new one">
+    <span class="run-chip-label">run</span>
+    <select id="run-select"><option value="">none yet</option></select>
+    <button id="btn-new-run" title="Start a new (empty) run">+</button>
+  </div>
+  <nav id="steps">
+    <button class="step active" data-stage="setup">
+      <span class="step-num">1</span>
+      <span><strong>Setup</strong><small>packing generator</small></span>
+      <span class="step-state" id="state-setup"></span>
+    </button>
+    <button class="step" data-stage="pack">
+      <span class="step-num">2</span>
+      <span><strong>Pack</strong><small>simulate the packing</small></span>
+      <span class="step-state" id="state-pack"></span>
+    </button>
+    <button class="step" data-stage="mesh">
+      <span class="step-num">3</span>
+      <span><strong>Mesh</strong><small>preview the solid</small></span>
+      <span class="step-state" id="state-mesh"></span>
+    </button>
+    <button class="step" data-stage="export">
+      <span class="step-num">4</span>
+      <span><strong>Export</strong><small>printable .3mf</small></span>
+      <span class="step-state" id="state-export"></span>
+    </button>
+  </nav>
+  <footer>
+    <p id="project-path" class="muted"></p>
+    <p class="muted">on-device · <span id="version"></span></p>
+  </footer>
+</aside>
+
+<main>
+  <!-- ============ 1 · SETUP ============ -->
+  <section id="stage-setup" class="stage visible">
+    <header><h2>Setup</h2>
+      <p>The packing simulation uses
+      <a href="https://github.com/VasiliBaranov/packing-generation" target="_blank">
+      <em>PackingGeneration</em></a> by Vasili Baranau (MIT license). It is
+      <strong>not bundled</strong> with RCPS — it is cloned and compiled on your
+      machine, or you point to a copy you already built.</p>
+      <div class="cite">
+        <strong>Please cite when you use packings from it:</strong><br>
+        Baranau &amp; Tallarek, <i>Another resolution of the configurational
+        entropy paradox as applied to hard spheres</i>, J. Chem. Phys. 147,
+        224503 (2017) — <a href="https://doi.org/10.1063/1.4999483"
+        target="_blank">doi:10.1063/1.4999483</a><br>
+        or Baranau &amp; Tallarek, <i>Beyond Salsburg–Wood: glass equation of
+        state for polydisperse hard spheres</i>, AIP Advances 11, 035311
+        (2021) — <a href="https://doi.org/10.1063/5.0036411"
+        target="_blank">doi:10.1063/5.0036411</a>
+      </div>
+    </header>
+    <div class="card">
+      <h3>Option A — build automatically</h3>
+      <p class="muted">Requires <code>git</code> and a C++ compiler
+        (macOS: <code>xcode-select --install</code>). Clones into
+        <code>packing-generation/</code> in the folder where
+        <code>rcps-gui</code> was started and compiles the program sources
+        directly (~1 min).</p>
+      <button class="primary" id="btn-clone">Clone & build</button>
+    </div>
+    <div class="card">
+      <h3>Option B — use an existing executable</h3>
+      <div class="row">
+        <input id="exe-path" type="text" placeholder="/path/to/PackingGeneration.exe">
+        <button class="primary" id="btn-exe">Use this</button>
+      </div>
+      <p class="ok hidden" id="exe-ok">✓ executable configured</p>
+    </div>
+    <pre class="log hidden" id="log-setup"></pre>
+    <div class="card">
+      <h3>Option C — start from an existing packing</h3>
+      <div class="row">
+        <input id="example-path" type="text"
+               placeholder="/path/to/packing.xyzd (e.g. the repo's data_example)">
+        <button id="btn-example">Load packing</button>
+      </div>
+      <p class="muted">Copies the file (and its .nfo / packing_meta.json, if
+        present) into a new run folder under <code>output/</code>, then you can
+        go straight to <strong>Mesh</strong>.</p>
+    </div>
+    <div class="card">
+      <h3>Option D — run the packing in Google Colab</h3>
+      <p class="muted">No local compiler needed:
+        <a href="https://colab.research.google.com/drive/1bgj9sSHnXJZjiG9aw09_NAw1YoZJRMmu?usp=sharing"
+           target="_blank">open the Colab notebook</a>, adjust the input
+        parameters at the top (particles, box size, diameter, seed), run all
+        cells, download the resulting <code>packing.xyzd</code> +
+        <code>packing.nfo</code>, and load them here via Option C.</p>
+    </div>
+  </section>
+
+  <!-- ============ 2 · PACK ============ -->
+  <section id="stage-pack" class="stage">
+    <header><h2>Pack</h2>
+      <p>Force-biased start (<code>-fba</code>), then Lubachevsky–Stillinger
+      densification (<code>-ls</code>, <code>-lsgd</code>).</p>
+      <p>Afterwards the diameters in <code>packing.xyzd</code> are rescaled
+      to their <em>true jammed</em> values: the generator keeps the nominal
+      diameter in the file and reports the real size as a ratio (its
+      "inner diameter ratio"), per
+      <a href="https://github.com/VasiliBaranov/packing-generation/issues/30"
+         target="_blank">packing-generation issue #30</a>. Without the
+      rescale the file would describe overlapping spheres. Provenance goes
+      to <code>packing_meta.json</code>.</p>
+    </header>
+    <div class="banner hidden" id="pack-banner">
+      <span>✓ This run already contains a packing — meshing is the next step.
+      Use the <b>+</b> button in the sidebar for a fresh run.</span>
+      <a href="#" id="pack-unlock">run a new packing anyway</a>
+    </div>
+    <div class="card" id="pack-card">
+      <div class="grid2">
+        <label><span class="lbl">Sphere diameter d [mm]
+          <span class="tip" data-tip="Nominal sphere diameter of the printed lattice. Sets the geometric scale of everything downstream (bridges, voxel counts, printability).">ⓘ</span></span>
+          <input id="p-d" type="number" value="6.0" step="0.1" min="0.5"></label>
+        <label><span class="lbl">Box edge L [mm]
+          <span class="tip" data-tip="Edge length of the cubic periodic tile. The printed tile is L×L×L; facilities are built from copies of this tile.">ⓘ</span></span>
+          <input id="p-box" type="number" value="50" step="1" min="5"></label>
+        <label><span class="lbl">Target porosity φ
+          <span class="tip" data-tip="Requested void fraction (porous-media convention: φ = porosity). Note the sphere-packing literature quotes the complement: random close packing density ≈ 0.64 (Baranau & Tallarek 2014) = porosity ≈ 0.36. Requests below ≈ 0.36 will not be fully reached; the achieved value is reported after the run.">ⓘ</span></span>
+          <input id="p-phi" type="number" value="0.35" step="0.005" min="0.30" max="0.99"></label>
+        <label><span class="lbl">Seed
+          <span class="tip" data-tip="Random seed. The same seed with the same parameters reproduces the identical packing — record it for reproducibility.">ⓘ</span></span>
+          <input id="p-seed" type="number" value="809"></label>
+        <label><span class="lbl">Contraction rate
+          <span class="tip" data-tip="How aggressively the generator densifies (default 1e-3). Smaller values run longer but get closer to the jamming limit; larger values are faster but jam looser.">ⓘ</span></span>
+          <input id="p-cr" type="text" value="1e-3"></label>
+        <label><span class="lbl">Particles N (computed)
+          <span class="tip" data-tip="N = floor((1−φ)·L³ / (π d³/6)) — the number of spheres implied by your diameter, box and target porosity.">ⓘ</span></span>
+          <input id="p-n" type="number" readonly class="readonly"></label>
+      </div>
+      <details class="advanced">
+        <summary>Advanced simulation options</summary>
+        <div class="grid2">
+          <label><span class="lbl">Steps to write
+            <span class="tip" data-tip="How often the generator writes intermediate state to disk (in simulation steps; default 1000). Lower values give more frequent checkpoints at a small I/O cost.">ⓘ</span></span>
+            <input id="p-steps" type="number" value="1000" min="100" step="100"></label>
+          <label><span class="lbl">Boundaries
+            <span class="tip" data-tip="Fixed to periodic by design: the tile must be periodic so ghost spheres preserve bulk porosity at the faces and facility tiles interlock. Not configurable.">ⓘ</span></span>
+            <input type="text" value="periodic (fixed)" readonly class="readonly"></label>
+        </div>
+        <p class="muted">The three simulation stages (-fba force-biased start,
+        -ls Lubachevsky–Stillinger, -lsgd LS with gradual densification) run in
+        sequence — the exact commands appear in the log below.</p>
+      </details>
+      <button class="primary" id="btn-pack">Run packing</button>
+      <button class="ghost hidden" id="btn-pack-cancel">Cancel</button>
+    </div>
+    <div class="card hidden" id="pack-result">
+      <h3>Result</h3><p id="pack-summary"></p>
+      <div class="viewport" id="view-pack"></div>
+    </div>
+    <pre class="log hidden" id="log-pack"></pre>
+  </section>
+
+  <!-- ============ 3 · MESH ============ -->
+  <section id="stage-mesh" class="stage">
+    <header><h2>Mesh</h2>
+      <p>Fast coarse-voxel preview of the printable solid — bridges, wall cuts
+      and porosity included. Production resolution happens in Export.</p>
+    </header>
+    <div class="card">
+      <div class="grid2">
+        <label><span class="lbl">Preview voxel [mm]
+          <span class="tip" data-tip="Grid resolution for the quick preview. Coarser = faster but blockier (1.0 mm ≈ a minute; 0.5 mm is finer but several minutes). Geometry quality at production resolution is set in Export, not here.">ⓘ</span></span>
+          <input id="m-vox" type="number" value="1.0" step="0.1" min="0.2" max="5"></label>
+        <label><span class="lbl">What to print
+          <span class="tip" data-tip="beads = the solid spheres (a porous plug for flow experiments). pore = the inverse: the void space as a solid (e.g. for casting or visualization).">ⓘ</span></span>
+          <select id="m-what"><option value="beads" selected>beads (solid spheres)</option>
+            <option value="pore">pore space (the inverse)</option></select>
+        </label>
+        <label><span class="lbl">Bridges
+          <span class="tip" data-tip="Small cylinders added at every sphere–sphere contact so the printed lattice holds together. 'none' gives point contacts only — usually too fragile to print.">ⓘ</span></span>
+          <select id="m-bridge"><option value="cylinders" selected>cylinders</option>
+            <option value="none">none</option></select>
+        </label>
+        <label><span class="lbl">Bridge radius / sphere radius
+          <span class="tip" data-tip="Bridge cylinder radius as a fraction of the smaller sphere radius at each contact (default 0.15 → ~0.45 mm for d = 6 mm). Larger = stronger but lowers porosity slightly.">ⓘ</span></span>
+          <input id="m-rf" type="number" value="0.15" step="0.01" min="0" max="0.5">
+        </label>
+        <label><span class="lbl">Mesher
+          <span class="tip" data-tip="auto = marching cubes (scikit-image) for previews and CGAL (iso2mesh) for production exports. skimage: fast and robust, uniform triangles. iso2mesh: adaptive CGAL triangulation — the backend the pipeline was validated with; required to reproduce the reference results.">ⓘ</span></span>
+          <select id="m-backend">
+            <option value="auto" selected>auto (recommended)</option>
+            <option value="skimage">skimage (marching cubes)</option>
+            <option value="iso2mesh">iso2mesh (CGAL)</option>
+          </select>
+        </label>
+      </div>
+      <details class="advanced">
+        <summary>Advanced meshing options (iso2mesh only)</summary>
+        <div class="grid2">
+          <label><span class="lbl">angbound [°]
+            <span class="tip" data-tip="Minimum triangle angle CGAL guarantees (default 25°). Higher = better-shaped triangles but slower; above ~30° CGAL may not terminate.">ⓘ</span></span>
+            <input id="a-ang" type="number" value="25" step="1" min="10" max="30"></label>
+          <label><span class="lbl">radbound [vox]
+            <span class="tip" data-tip="Maximum triangle circumradius in voxel units (default 1.0) — the triangle size cap. Smaller = finer mesh, more triangles.">ⓘ</span></span>
+            <input id="a-rad" type="number" value="1.0" step="0.1" min="0.2"></label>
+          <label><span class="lbl">distbound [vox]
+            <span class="tip" data-tip="Maximum allowed deviation between a triangle and the true iso-surface, in voxel units (default 0.1 → 10 µm at vox 0.1 mm). The surface-accuracy knob; smaller = more faithful and more triangles.">ⓘ</span></span>
+            <input id="a-dist" type="number" value="0.10" step="0.01" min="0.01"></label>
+          <label><span class="lbl">maxnode
+            <span class="tip" data-tip="Hard cap on the number of surface nodes (default 2e8). A safety stop against runaway meshes; rarely needs changing.">ⓘ</span></span>
+            <input id="a-maxn" type="text" value="2e8"></label>
+        </div>
+      </details>
+      <div class="diameter-choice" id="m-diameter">
+        <p><strong>Printed diameters</strong>
+          <span class="tip" data-tip="The simulation stores the exact diameters at which the spheres jammed (slightly below your request). You choose which version gets printed — this changes the porosity of the physical part, and porosity drives permeability (≈16% shift between these options for the example packing).">ⓘ</span></p>
+        <label class="radio"><input type="radio" name="dia" value="stored" checked>
+          <span><b>As simulated</b> — the exact jammed packing: spheres touch at
+            single points; porosity exactly as achieved by the simulation.
+            <em id="dia-stored-info">–</em></span></label>
+        <label class="radio" id="dia-design-label"><input type="radio" name="dia" value="design">
+          <span><b>Inflated to nominal d</b> — spheres slightly enlarged to your
+            requested diameter: ~tens of µm overlap at every contact (stronger
+            print), porosity equals your original target.
+            <em id="dia-design-info">–</em></span></label>
+      </div>
+      <button class="primary" id="btn-mesh">Mesh preview</button>
+    </div>
+    <div class="card hidden" id="mesh-result">
+      <h3>Preview</h3><p id="mesh-summary"></p>
+      <div class="viewport" id="view-mesh"></div>
+    </div>
+    <pre class="log hidden" id="log-mesh"></pre>
+  </section>
+
+  <!-- ============ 4 · EXPORT ============ -->
+  <section id="stage-export" class="stage">
+    <header><h2>Export</h2>
+      <p>Full-resolution printable .3mf. A single tile, or a whole facility of
+      interlocking tiles with an assembly map.</p>
+      <p class="muted">Mesher, bridges, printed-diameter choice and the advanced
+      meshing options are taken from step <strong>3 · Mesh</strong> — only the
+      resolution and the facility grid are set here.</p>
+    </header>
+    <div class="card">
+      <h3>Field inspector <span class="muted">(optional)</span>
+        <span class="tip" data-tip="Slice through the signed-distance field before committing to a long meshing run — like scrolling through a CT scan. Blue = inside the solid, warm = outside; the black contour is the F = 0 iso-line, i.e. exactly the surface the mesher will extract.">ⓘ</span></h3>
+      <div class="row">
+        <label style="max-width:180px"><span class="lbl">Field voxel [mm]
+          <span class="tip" data-tip="Resolution of the inspected field only (the export resolution is set below). 0.5 mm computes in seconds; finer is sharper but heavier.">ⓘ</span></span>
+          <input id="s-vox" type="number" value="0.5" step="0.05" min="0.05" max="2"></label>
+        <button id="btn-sdf" style="align-self:flex-end">Compute field</button>
+      </div>
+      <div class="slicer hidden" id="slicer">
+        <div class="slicer-controls">
+          <div class="seg" id="s-axis">
+            <button data-axis="0">x</button>
+            <button data-axis="1">y</button>
+            <button data-axis="2" class="on">z</button>
+          </div>
+          <input id="s-slider" type="range" min="0" max="100" value="50">
+          <span class="muted" id="s-pos"></span>
+        </div>
+        <div class="slicer-view">
+          <canvas id="s-canvas"></canvas>
+          <div class="slicer-bar">
+            <canvas id="s-colorbar" width="18" height="240"></canvas>
+            <div class="slicer-bar-labels">
+              <span id="s-max"></span>
+              <span id="s-zero">— F = 0 (surface)</span>
+              <span id="s-min"></span>
+            </div>
+          </div>
+        </div>
+        <p class="muted">scroll on the image to move through slices · F in mm
+          (negative = inside the printed solid)</p>
+      </div>
+      <pre class="log hidden" id="log-sdf"></pre>
+    </div>
+    <div class="card">
+      <div class="grid2">
+        <label><span class="lbl">Production voxel [mm]
+          <span class="tip" data-tip="Grid resolution of the final mesh. 0.1 mm is the validated production value (≈80–100 min per unique tile, ~0.5 GB RAM). Runtime and memory scale with (1/voxel)³; the pipeline refuses grids that would not fit in memory.">ⓘ</span></span>
+          <input id="e-vox" type="number" value="0.1" step="0.05" min="0.05" max="1"></label>
+        <label><span class="lbl">Facility grid (x · y · z tiles)
+          <span class="tip" data-tip="How many copies of the tile to assemble per axis. Interior faces interlock (each sphere prints on exactly one tile); exterior faces are cut flush. Only the unique tile types are meshed — e.g. 4·4·1 needs 9 meshes for 16 tiles.">ⓘ</span></span>
+          <span class="row tight">
+            <input id="e-gx" type="number" value="1" min="1" style="width:4.2em">
+            <input id="e-gy" type="number" value="1" min="1" style="width:4.2em">
+            <input id="e-gz" type="number" value="1" min="1" style="width:4.2em">
+          </span>
+        </label>
+      </div>
+      <div class="schematic-wrap">
+        <div id="e-schematic"></div>
+        <p class="muted" id="e-estimate"></p>
+      </div>
+      <button class="primary" id="btn-export">Export .3mf</button>
+      <button class="ghost" id="btn-export-dry">Dry run (plan only)</button>
+      <button class="ghost hidden" id="btn-export-cancel">Cancel</button>
+    </div>
+    <div class="card hidden" id="export-result">
+      <h3>Files</h3><pre id="export-files" class="files"></pre>
+    </div>
+    <pre class="log hidden" id="log-export"></pre>
+  </section>
+</main>
+
+<script src="/static/vendor/three.min.js"
+        onerror="window._threeCDN=true"></script>
+<script>
+if (window._threeCDN || typeof THREE === 'undefined') {
+  var s = document.createElement('script');
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+  s.onload = function(){ window.dispatchEvent(new Event('three-ready')); };
+  document.head.appendChild(s);
+} else {
+  window.addEventListener('load', function(){ window.dispatchEvent(new Event('three-ready')); });
+}
+</script>
+<script src="/static/app.js"></script>
+</body>
+</html>

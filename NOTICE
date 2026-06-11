@@ -1,0 +1,102 @@
+RCPS-3DPRINT — third-party software and attribution
+=====================================================
+
+The `rcps-3dprint` package is released under the MIT License (see LICENSE).
+At runtime it depends on the following third-party software. Their licenses
+apply to those components and to any combined work assembled on the user's
+machine when the dependencies are installed and invoked together with
+rcps-3dprint.
+
+If you redistribute a modified work that combines rcps-3dprint with any of
+the GPL-licensed dependencies below, the terms of the corresponding GPL
+license will apply to the combined work. rcps-3dprint itself, as distributed,
+remains under MIT.
+
+---------------------------------------------------------------------------
+
+iso2mesh / pyiso2mesh
+  Authors: Qianqian Fang and contributors
+  License: GPL-2.0-or-later (with CGAL components, see iso2mesh docs)
+  Source:  http://iso2mesh.sourceforge.net/
+           https://github.com/fangq/iso2mesh
+  Role:    CGAL-based surface meshing of the implicit field (vol2restrictedtri)
+  Citation:
+    Fang, Q., & Boas, D. A. (2009). Tetrahedral mesh generation from volumetric
+    binary and grayscale images. 2009 IEEE International Symposium on Biomedical
+    Imaging: From Nano to Macro, 1142-1145.
+
+pymeshfix / MeshFix
+  Authors: Marco Attene and contributors; Python bindings by Alex Kaszynski
+  License: GPL-3.0-or-later
+  Source:  https://github.com/MarcoAttene/MeshFix-V2.1
+           https://github.com/pyvista/pymeshfix
+  Role:    Watertightness repair of the iso-surface mesh prior to .3mf export
+  Citation:
+    Attene, M. (2010). A lightweight approach to repairing digitized polygon
+    meshes. The Visual Computer, 26(11), 1393-1406.
+
+packing-generation
+  Author:  Vasili Baranau
+  License: MIT (Copyright (c) 2013, Vasili Baranau; see LICENSE.txt in that repo)
+  Source:  https://github.com/VasiliBaranov/packing-generation
+  Role:    Random close-packed sphere generation. NOT bundled or redistributed
+           with rcps-3dprint: rcps-gui clones and compiles it on the user's
+           machine (or in Colab), preserving its license file. The
+           packing.xyzd output is consumed by rcps.io.load_packing_xyzd().
+  Citation (requested by the authors when packings are used in research):
+    Baranau, V., & Tallarek, U. (2017). Another resolution of the
+    configurational entropy paradox as applied to hard spheres.
+    J. Chem. Phys. 147, 224503. doi:10.1063/1.4999483
+    -- or --
+    Baranau, V., & Tallarek, U. (2021). Beyond Salsburg-Wood: Glass equation
+    of state for polydisperse hard spheres. AIP Advances 11, 035311.
+    doi:10.1063/5.0036411
+    For the FBA / Lubachevsky-Stillinger algorithms and the density vs
+    contraction-rate behaviour, see also: Baranau, V., & Tallarek, U. (2014).
+    Random-close packing limits for monodisperse and polydisperse hard
+    spheres. Soft Matter, 10(21), 3826-3841. doi:10.1039/c3sm52959b
+
+three.js (vendored)
+  Authors: three.js authors
+  License: MIT (full text: rcps_gui/static/vendor/LICENSE-three.txt)
+  Source:  https://github.com/mrdoob/three.js (r128, via cdnjs)
+  Role:    WebGL 3D previews in rcps-gui. The single minified file
+           rcps_gui/static/vendor/three.min.js is vendored unmodified so the
+           GUI previews work offline; its copyright notice is preserved
+           alongside.
+
+write3mf (legacy)
+  Author:  Claudio Vergari
+  License: MIT
+  Source:  https://github.com/cvergari/write3mf
+  Role:    The original MATLAB function used by RCPS_v4.m to write .3mf files.
+           Superseded in the Python port by trimesh.exchange.threemf.export_3MF
+           (BSD-3-Clause, MIT-compatible) which provides full-float vertex
+           precision. Listed here for historical attribution.
+
+trimesh
+  License: MIT
+  Source:  https://github.com/mikedh/trimesh
+  Role:    .3mf writer, mesh repair utilities, mesh diagnostics.
+
+NumPy, SciPy
+  License: BSD-3-Clause
+  Role:    Array math, KD-tree neighbour search.
+
+PyYAML
+  License: MIT
+  Role:    Configuration file parsing.
+
+lxml
+  License: BSD-3-Clause
+  Role:    XML serialization used by trimesh's 3MF writer.
+
+scikit-image (optional)
+  License: BSD-3-Clause
+  Role:    Marching-cubes fallback meshing backend.
+
+---------------------------------------------------------------------------
+
+The user is responsible for complying with the licenses of all installed
+dependencies. The maintainers of rcps-3dprint do not redistribute any of the
+above software; pip resolves them from their respective package indexes.

@@ -1,0 +1,47 @@
+# Example RCPS config: 50x50x50 mm tile, 6 mm spheres, target porosity 0.35.
+# This mirrors data_example/packing.xyzd / data_example/packing.nfo.
+#
+# The schema is defined by `rcps.config.RcpsConfig` (Task 7).
+# Defaults match the "recommended" values from RCPS_v4.m; uncomment to override.
+
+paths:
+  root: ../data_example          # folder containing packing.xyzd
+  packing: ../data_example/packing.xyzd
+  out_dir: ./out
+
+geom:
+  tile_size_mm: [50.0, 50.0, 50.0]      # MUST match the packing-generation domain
+  target_porosity: 0.35                  # informational; the actual porosity comes from packing.xyzd
+
+spheres:
+  diameter_mm: 6.0
+  expansion_factor: 1.00                 # print-radius multiplier; >1.0 closes inter-bead gaps globally
+  contact_tol_mm: 0.20                   # pair counted as "in contact" if gap < contact_tol_mm
+
+field:
+  export_what: beads                     # 'beads' | 'pore'
+  ghost_tiles: 1                         # ghost-tile layers for boundary-correct SDF
+  pad_vox: 1                             # voxel padding to extract clean box walls
+  band_vox: 3                            # ICSG narrow-band width (voxels)
+  keep_sides: []                         # any subset of L,R,A,P,S,I; e.g. [S, R] dovetails on top + right
+
+grid:
+  vox_size_mm: 0.1                       # snap-to-divisible logic adjusts this to exactly divide tile_size_mm
+
+bridge:
+  mode: cylinders                        # 'none' | 'cylinders' | 'diameter'
+  radius_frac: 0.15                      # cylinders only: cyl radius = radius_frac * min(r_i, r_j)
+
+mesh:
+  iso2mesh:
+    angbound_deg: 25
+    radbound: 1.0
+    distbound: 0.10
+    maxnode: 200000000
+
+out:
+  base_name: packed_icsg_beads_iso2mesh_vox_0.1
+  save_3mf: true
+  save_stl: false
+  write_info_txt: true
+  write_config_json: true
