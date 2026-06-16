@@ -26,6 +26,9 @@ authors:
   - family-names: Giurgiu
     given-names: Vlad
     email: vladgiurgiubv@me.com
+  - family-names: De Paoli
+    given-names: Marco
+    email: marco.de.paoli@tuwien.ac.at
 # doi: 10.5281/zenodo.XXXXXXX     # Zenodo will mint this on first GitHub release
 # preferred-citation:
 #   type: article
