@@ -18,11 +18,14 @@ cell with poured glass spheres. That practice has three well-known problems:
 
 1. **Irreproducibility** — pouring never produces the same configuration
    twice, so porosity and permeability differ between experiments and between
-   labs, with an uncertainty that is hard to quantify.
+   labs, with an uncertainty that is hard to quantify (Torquato, Truskett &
+   Debenedetti 2000).
 2. **Packing protocols** — reaching dense random packing requires vibration or
-   tapping protocols that are impractical around sensitive instrumentation.
-3. **Wall effects** — poured packings are systematically looser near walls,
-   locally increasing permeability and biasing measurements.
+   tapping protocols that are impractical around sensitive instrumentation
+   (Knight et al. 1995).
+3. **Wall effects** — poured packings are systematically looser near walls
+   (Desmond & Weeks 2009), locally increasing permeability and biasing
+   measurements (Fand & Thinakaran 1990; Beavers et al. 1973).
 
 3D printing the *same simulated packing* for every experiment removes all
 three: the geometry is identical across prints and labs, the bulk porosity is
@@ -221,6 +224,14 @@ code except one clearly-marked file. What we use, and under which license:
 Full details and redistribution implications: [`NOTICE`](NOTICE).
 
 ## References
+
+**Why 3D printing: problems with poured packings**
+
+- Torquato, S., Truskett, T. M. & Debenedetti, P. G. (2000). Is random close packing of spheres well defined? *Phys. Rev. Lett.* 84, 2064–2067. [doi:10.1103/PhysRevLett.84.2064](https://doi.org/10.1103/PhysRevLett.84.2064)
+- Knight, J. B., Fandrich, C. G., Lau, C. N., Jaeger, H. M. & Nagel, S. R. (1995). Density relaxation in a vibrated granular material. *Phys. Rev. E* 51, 3957–3963. [doi:10.1103/PhysRevE.51.3957](https://doi.org/10.1103/PhysRevE.51.3957)
+- Fand, R. M. & Thinakaran, R. (1990). The influence of the wall on flow through pipes packed with spheres. *J. Fluids Eng.* 112, 84–88. [doi:10.1115/1.2909373](https://doi.org/10.1115/1.2909373)
+- Beavers, G. S., Sparrow, E. M. & Rodenz, D. E. (1973). Influence of bed size on the flow characteristics and porosity of randomly packed beds of spheres. *J. Appl. Mech.* 40, 655–660. [doi:10.1115/1.3423067](https://doi.org/10.1115/1.3423067)
+- Desmond, K. W. & Weeks, E. R. (2009). Random close packing of disks and spheres in confined geometries. *Phys. Rev. E* 80, 051305. [doi:10.1103/PhysRevE.80.051305](https://doi.org/10.1103/PhysRevE.80.051305)
 
 **Methods used by this pipeline**
 
