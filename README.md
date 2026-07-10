@@ -256,6 +256,11 @@ Full details and redistribution implications: [`NOTICE`](NOTICE).
 - Guo, R. et al. (2023). 3D-printed fluidics for miscible density-driven convection in porous media. *Adv. Water Resour.* [doi:10.1016/j.advwatres.2023.104496](https://doi.org/10.1016/j.advwatres.2023.104496)
 - Kondo, A. et al. (2017). Reproduction of a discrete element model by 3D printing and its experimental validation on permeability. *Springer Proc.* 517–524. [doi:10.1007/978-3-319-52773-4_62](https://doi.org/10.1007/978-3-319-52773-4_62)
 
+## Funding
+
+Funded by the European Union (ERC, MORPHOS, 101163625). Views and opinions expressed are however those of the author(s) only and do not necessarily reflect those of the European Union or the European Research Council. Neither the European Union nor the granting authority can be held responsible for them.
+
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE). The GPL licenses of iso2mesh and pymeshfix
