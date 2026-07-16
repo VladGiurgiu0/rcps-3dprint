@@ -266,7 +266,8 @@ def run_packing(job: Job, workdir: str | Path, exe: str | Path,
 
     # stale outputs from a previous run must not survive
     for f in ["packing.xyzd", "packing_init.xyzd", "packing_prev.xyzd",
-              "contraction_energies.txt", "packing.nfo", "packing_meta.json"]:
+              "contraction_energies.txt", "packing.nfo", "packing_meta.json",
+              "packing_metrics.json"]:
         (wd / f).unlink(missing_ok=True)
 
     nominal_phi = 1.0 - n * (np.pi / 6.0) * d_nom**3 / (box[0] * box[1] * box[2])
@@ -344,6 +345,24 @@ def packing_preview(workdir: str | Path) -> dict[str, Any]:
             "mean_d_mm": round(float(np.mean(S[:, 3])) * factor, 4),
         }
 
+    # Structure metrics: RCP diagnostics + Kozeny-Carman permeability
+    # (rcps.metrics — see its docstring for equations and exact sources).
+    # Persisted to packing_metrics.json in the run folder for traceability;
+    # computed once and re-read afterwards (idempotent).
+    metrics = None
+    try:
+        from rcps.metrics import rcp_metrics
+
+        metrics_path = wd / "packing_metrics.json"
+        if metrics_path.exists():
+            metrics = json.loads(metrics_path.read_text())
+        else:
+            d_nominal = design["mean_d_mm"] if design else None
+            metrics = rcp_metrics(S[:, :3], S[:, 3], box, d_nominal_mm=d_nominal)
+            metrics_path.write_text(json.dumps(metrics, indent=2))
+    except Exception:  # diagnostics must never break the preview
+        metrics = None
+
     return {
         "n": int(S.shape[0]),
         "box_mm": box,
@@ -353,4 +372,5 @@ def packing_preview(workdir: str | Path) -> dict[str, Any]:
         "diameters": np.round(S[:, 3], 4).tolist(),
         "meta": meta,
         "design": design,
+        "metrics": metrics,
     }

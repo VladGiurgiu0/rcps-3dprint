@@ -264,3 +264,9 @@ details.advanced[open] summary::before { content: "▾ "; }
   vertical-align: -2px; margin-right: 7px;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* structure-metrics table (Pack tab) */
+.mtable { border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+.mtable th { text-align: left; color: var(--muted); font-weight: 600;
+  padding: 4px 14px 4px 0; border-bottom: 1px solid var(--line); }
+.mtable td { padding: 4px 14px 4px 0; border-bottom: 1px solid var(--line); }

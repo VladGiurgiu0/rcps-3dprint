@@ -330,8 +330,53 @@ async function refreshPackPreview() {
       $("dia-design-info").textContent =
         "unavailable — no .nfo / packing_meta.json next to the loaded packing";
     }
+    renderPackMetrics(data.metrics);
     showSpheres($("view-pack"), data);
   } catch (e) { /* no packing yet */ }
+}
+
+/* RCP structure metrics (rcps/metrics.py; persisted to packing_metrics.json) */
+function renderPackMetrics(m) {
+  const line = $("pack-metrics"), det = $("pack-metrics-details");
+  if (!m || !m.coordination) {
+    line.classList.add("hidden"); det.classList.add("hidden"); return;
+  }
+  const co = m.coordination, kc = m.kozeny_carman, ck = m.rcp_checklist;
+  const kBed = kc.k_m2_nominal_d ?? kc.k_m2_stored_d;
+  const kExp = (x) => (x == null || !isFinite(x)) ? "–" : x.toExponential(2);
+  line.innerHTML =
+    `packing fraction <b>${m.packing_fraction.toFixed(4)}</b> ` +
+    `(ε = ${m.porosity.toFixed(4)}) · ` +
+    `z = <b>${co.z_no_rattlers.toFixed(2)}</b> (isostatic 6) · ` +
+    `k<sub>KC</sub> ≈ <b>${kExp(kBed)} m²</b> · ` +
+    (m.is_rcp_consistent
+      ? `<span class="ok">✓ RCP-consistent</span>`
+      : `<span class="err">deviates from RCP — see details</span>`);
+  const pf = (b) => b ? `<span class="ok">✓</span>` : `<span class="err">✗</span>`;
+  const rows = [
+    [`packing fraction φ<sub>pack</sub>`, m.packing_fraction.toFixed(4),
+     `0.642–0.649 sim. / 0.643–0.659 theory — Anzivino et al. 2023`,
+     pf(ck.phi_in_rcp_window)],
+    [`kissing number z (no rattlers)`, co.z_no_rattlers.toFixed(3),
+     `6 = isostatic (Maxwell) — Anzivino et al. 2023, Eq. (1)`,
+     pf(ck.isostatic)],
+    [`rattler fraction (z<sub>i</sub> &lt; 4)`,
+     `${(100 * co.rattler_fraction).toFixed(1)}% (${co.n_rattlers})`,
+     `small (&lt; 5%); loose spheres are normal in jammed packings`,
+     pf(ck.rattler_fraction_ok)],
+    [`Berryman median NN / d`, m.berryman_median_nn_over_d.toFixed(5),
+     `= 1 at RCP — Berryman 1983`, pf(ck.berryman)],
+    [`k (Kozeny–Carman, printed d)`, `${kExp(kBed)} m²`,
+     `Eq. (3.3) of De Paoli et al. 2024, k<sub>C</sub> = 5; creeping flow`, ``],
+  ];
+  $("pack-metrics-body").innerHTML =
+    `<table class="mtable"><tr><th>quantity</th><th>value</th>` +
+    `<th>RCP reference</th><th></th></tr>` +
+    rows.map((r) => `<tr><td>${r[0]}</td><td><b>${r[1]}</b></td>` +
+                    `<td>${r[2]}</td><td>${r[3]}</td></tr>`).join("") +
+    `</table>`;
+  line.classList.remove("hidden");
+  det.classList.remove("hidden");
 }
 
 /* ---------- Mesh stage ---------- */

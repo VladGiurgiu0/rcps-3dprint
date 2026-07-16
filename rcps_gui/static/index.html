@@ -168,6 +168,32 @@
     </div>
     <div class="card hidden" id="pack-result">
       <h3>Result</h3><p id="pack-summary"></p>
+      <p id="pack-metrics" class="hidden"></p>
+      <details class="advanced hidden" id="pack-metrics-details">
+        <summary>Structure metrics — is this packing RCP?</summary>
+        <div id="pack-metrics-body"></div>
+        <p class="muted">Definitions: packing fraction φ<sub>pack</sub> = Σ(πd³/6)/V
+        (porosity ε = 1 − φ<sub>pack</sub>); kissing number z = 2N<sub>c</sub>/N — Eq. (1)
+        of Anzivino et al. 2023, isostatic z<sub>c</sub> = 2d = 6 (Maxwell); RCP is
+        defined as the <em>densest isostatic packing</em> — Fig. 2 of Anzivino et al.
+        2023; the reference windows φ<sub>RCP</sub> = 0.642–0.649 (simulations, their
+        note [103]) and 0.643–0.659 (Percus–Yevick theory, their Table 1) are from the
+        same paper; Berryman criterion: median nearest-neighbor distance = d at RCP
+        (Berryman 1983); permeability k = d²ε³/[36k<sub>C</sub>(1−ε)²] with
+        k<sub>C</sub> = 5 — Eq. (3.3) of De Paoli et al. 2024, accurate for random
+        sphere packs with 0.27 &lt; ε &lt; 0.38 (Vasseur et al. 2021).</p>
+        <p class="muted">Sources:
+        <a href="https://doi.org/10.1063/5.0137111" target="_blank">Anzivino et al.,
+        J. Chem. Phys. 158, 044901 (2023)</a> ·
+        <a href="https://doi.org/10.1103/PhysRevA.27.1053" target="_blank">Berryman,
+        Phys. Rev. A 27, 1053 (1983)</a> ·
+        <a href="https://doi.org/10.1017/jfm.2024.328" target="_blank">De Paoli et al.,
+        J. Fluid Mech. 987, A1 (2024)</a> ·
+        <a href="https://doi.org/10.1103/PhysRevE.103.062613" target="_blank">Vasseur
+        et al., Phys. Rev. E 103, 062613 (2021)</a>.
+        The same citations are stored with the numbers in
+        <code>packing_metrics.json</code> in the run folder.</p>
+      </details>
       <div class="viewport" id="view-pack"></div>
     </div>
     <pre class="log hidden" id="log-pack"></pre>
