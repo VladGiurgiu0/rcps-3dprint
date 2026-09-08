@@ -38,7 +38,7 @@
     </button>
     <button class="step" data-stage="export">
       <span class="step-num">4</span>
-      <span><strong>Export</strong><small>printable .3mf</small></span>
+      <span><strong>Export</strong><small>printable mesh</small></span>
       <span class="step-state" id="state-export"></span>
     </button>
   </nav>
@@ -224,6 +224,10 @@
           <span class="tip" data-tip="Bridge cylinder radius as a fraction of the smaller sphere radius at each contact (default 0.15 → ~0.45 mm for d = 6 mm). Larger = stronger but lowers porosity slightly.">ⓘ</span></span>
           <input id="m-rf" type="number" value="0.15" step="0.01" min="0" max="0.5">
         </label>
+        <label><span class="lbl">Contact tolerance [mm]
+          <span class="tip" data-tip="Which sphere pairs count as touching, and therefore get a bridge: a pair is a contact when its surface gap is smaller than this value (default 0.2 mm). Larger = more pairs bridged, fewer loose spheres, slightly lower porosity; 0 bridges only pairs that already touch or overlap. The preview reports the resulting contacts per sphere.">ⓘ</span></span>
+          <input id="m-ctol" type="number" value="0.20" step="0.01" min="0" max="2">
+        </label>
         <label><span class="lbl">Mesher
           <span class="tip" data-tip="auto = marching cubes (scikit-image) for previews and CGAL (iso2mesh) for production exports. skimage: fast and robust, uniform triangles. iso2mesh: adaptive CGAL triangulation — the backend the pipeline was validated with; required to reproduce the reference results.">ⓘ</span></span>
           <select id="m-backend">
@@ -275,8 +279,8 @@
   <!-- ============ 4 · EXPORT ============ -->
   <section id="stage-export" class="stage">
     <header><h2>Export</h2>
-      <p>Full-resolution printable .3mf. A single tile, or a whole facility of
-      interlocking tiles with an assembly map.</p>
+      <p>Full-resolution printable mesh (.3mf or .stl). A single tile, or a
+      whole facility of interlocking tiles with an assembly map.</p>
       <p class="muted">Mesher, bridges, printed-diameter choice and the advanced
       meshing options are taken from step <strong>3 · Mesh</strong> — only the
       resolution and the facility grid are set here.</p>
@@ -321,6 +325,14 @@
         <label><span class="lbl">Production voxel [mm]
           <span class="tip" data-tip="Grid resolution of the final mesh. 0.1 mm is the validated production value (≈80–100 min per unique tile, ~0.5 GB RAM). Runtime and memory scale with (1/voxel)³; the pipeline refuses grids that would not fit in memory.">ⓘ</span></span>
           <input id="e-vox" type="number" value="0.1" step="0.05" min="0.05" max="1"></label>
+        <label><span class="lbl">File format
+          <span class="tip" data-tip="What the export writes. .3mf is the default (compressed, carries the mm unit explicitly). .stl is the plain triangle-soup fallback for slicers that reject the .3mf — same geometry, roughly 3× the file size. 'both' writes the two side by side.">ⓘ</span></span>
+          <select id="e-format">
+            <option value="3mf" selected>.3mf (default)</option>
+            <option value="stl">.stl</option>
+            <option value="both">both (.3mf + .stl)</option>
+          </select>
+        </label>
         <label><span class="lbl">Facility grid (x · y · z tiles)
           <span class="tip" data-tip="How many copies of the tile to assemble per axis. Interior faces interlock (each sphere prints on exactly one tile); exterior faces are cut flush. Only the unique tile types are meshed — e.g. 4·4·1 needs 9 meshes for 16 tiles.">ⓘ</span></span>
           <span class="row tight">
@@ -334,7 +346,7 @@
         <div id="e-schematic"></div>
         <p class="muted" id="e-estimate"></p>
       </div>
-      <button class="primary" id="btn-export">Export .3mf</button>
+      <button class="primary" id="btn-export">Export mesh</button>
       <button class="ghost" id="btn-export-dry">Dry run (plan only)</button>
       <button class="ghost hidden" id="btn-export-cancel">Cancel</button>
     </div>

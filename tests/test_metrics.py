@@ -17,6 +17,7 @@ import pytest
 from rcps.metrics import (
     ISOSTATIC_Z_3D,
     berryman_ratio,
+    contact_stats,
     coordination_number,
     kozeny_carman,
     packing_fraction,
@@ -130,6 +131,67 @@ class TestExamplePacking:
     def test_verdict_and_serializable(self, metrics):
         assert metrics["is_rcp_consistent"] is True
         json.dumps(metrics)  # must round-trip to packing_metrics.json
+
+
+class TestContactStats:
+    """Absolute-gap contact criterion (the one the bridge builder uses)."""
+
+    def test_tangent_contacts_only(self):
+        """Vanishing tolerance on the SC lattice: 3 bonds/site, z = 6."""
+        c, d, box = _sc_lattice()
+        cs = contact_stats(c, d, box, contact_tol_mm=1e-9)
+        assert cs["n_contacts"] == 3 * c.shape[0]
+        assert cs["contacts_per_sphere"] == pytest.approx(6.0)
+        assert cs["n_isolated"] == 0
+        assert cs["n_under_coordinated"] == 0
+
+    def test_tolerance_reaches_second_neighbours(self):
+        """SC second neighbours sit at sqrt(2)a, i.e. a gap of 0.4142 a."""
+        c, d, box = _sc_lattice()
+        cs = contact_stats(c, d, box, contact_tol_mm=0.45)
+        assert cs["n_contacts"] == 9 * c.shape[0]        # 3 + 6 bonds per site
+        assert cs["contacts_per_sphere"] == pytest.approx(18.0)
+
+    def test_expansion_factor_closes_the_gap(self):
+        """Shrunken spheres are isolated until the printed radii are used."""
+        c, d, box = _sc_lattice()
+        d = d * 0.9                                       # 0.1 a gap everywhere
+        loose = contact_stats(c, d, box, contact_tol_mm=0.05)
+        assert loose["n_contacts"] == 0
+        assert loose["n_isolated"] == c.shape[0]
+        printed = contact_stats(c, d, box, contact_tol_mm=0.05,
+                                expansion_factor=1.0 / 0.9)
+        assert printed["n_contacts"] == 3 * c.shape[0]
+        assert printed["n_isolated"] == 0
+
+    def test_monotonic_in_tolerance(self, packing_xyzd_path):
+        S = np.fromfile(packing_xyzd_path, dtype="<f8").reshape(-1, 4)
+        counts = [
+            contact_stats(S[:, :3], S[:, 3], [50.0] * 3,
+                          contact_tol_mm=t)["n_contacts"]
+            for t in (0.0, 0.05, 0.2, 0.5)
+        ]
+        assert counts == sorted(counts)
+
+    def test_agrees_with_coordination_number_at_equivalent_tolerance(
+            self, packing_xyzd_path):
+        """For a monodisperse pack the two criteria coincide at tol = d*tol_rel.
+
+        coordination_number tests r_ij < (R_i+R_j)(1+tol_rel); contact_stats
+        tests r_ij - (R_i+R_j) < tol. Identical when tol = d * tol_rel.
+        """
+        S = np.fromfile(packing_xyzd_path, dtype="<f8").reshape(-1, 4)
+        d_mean = float(np.mean(S[:, 3]))
+        co = coordination_number(S[:, :3], S[:, 3], [50.0] * 3, tol_rel=1e-4)
+        cs = contact_stats(S[:, :3], S[:, 3], [50.0] * 3,
+                           contact_tol_mm=d_mean * 1e-4)
+        assert cs["n_contacts"] == co["n_contacts"]
+        assert cs["contacts_per_sphere"] == pytest.approx(co["z_mean"])
+
+    def test_serializable(self, packing_xyzd_path):
+        S = np.fromfile(packing_xyzd_path, dtype="<f8").reshape(-1, 4)
+        json.dumps(contact_stats(S[:, :3], S[:, 3], [50.0] * 3,
+                                 contact_tol_mm=0.2))
 
 
 class TestPreviewIntegration:

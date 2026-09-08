@@ -36,6 +36,25 @@ def _backend(prefer: str = "skimage") -> str:
     )
 
 
+def _out_dict(p: dict[str, Any]) -> dict[str, Any]:
+    """Resolve the Export-stage file-format choice into ``out.save_*`` flags.
+
+    ``export_format`` is ``"3mf"`` (default, unchanged behaviour), ``"stl"``
+    or ``"both"``. Anything unrecognised falls back to .3mf so a stale saved
+    state can never produce a run with no mesh output.
+    """
+    fmt = str(p.get("export_format", "3mf")).lower()
+    save_3mf = fmt in ("3mf", "both")
+    save_stl = fmt in ("stl", "both")
+    if not (save_3mf or save_stl):
+        save_3mf = True
+    return {
+        "base_name": p.get("base_name", "rcps_gui"),
+        "save_3mf": save_3mf,
+        "save_stl": save_stl,
+    }
+
+
 def _config_dict(packing: Path, out_dir: Path, p: dict[str, Any],
                  *, prefer_backend: str = "skimage") -> dict[str, Any]:
     box = [float(x) for x in p.get("box_mm", [50.0, 50.0, 50.0])]
@@ -74,7 +93,7 @@ def _config_dict(packing: Path, out_dir: Path, p: dict[str, Any],
             "radius_frac": float(p.get("radius_frac", 0.15)),
         },
         "mesh": mesh,
-        "out": {"base_name": p.get("base_name", "rcps_gui")},
+        "out": _out_dict(p),
     }
 
 
@@ -82,6 +101,35 @@ def resolve_expansion(diameter: str | float, packing: Path,
                       box: list[float]) -> tuple[float, dict[str, Any]]:
     from rcps.facility import resolve_expansion_factor
     return resolve_expansion_factor(diameter, packing, box)
+
+
+def _contact_stats(packing: Path, p: dict[str, Any], factor: float,
+                   job: Job) -> dict[str, Any] | None:
+    """Contacts at the chosen tolerance, on the periodic tile.
+
+    Same criterion as the bridge builder (gap < contact_tol_mm) with the
+    printed radii, so it reports what will actually be bridged and how many
+    spheres stay loose. Purely diagnostic — never allowed to break meshing.
+    """
+    try:
+        from rcps.io import load_packing_xyzd
+        from rcps.metrics import contact_stats
+
+        S = load_packing_xyzd(packing)
+        cs = contact_stats(
+            S[:, :3], S[:, 3],
+            [float(x) for x in p.get("box_mm", [50.0, 50.0, 50.0])],
+            contact_tol_mm=float(p.get("contact_tol_mm", 0.2)),
+            expansion_factor=float(factor),
+        )
+        job.log(f"contacts at tol={cs['contact_tol_mm']} mm: {cs['n_contacts']} "
+                f"pairs, {cs['contacts_per_sphere']:.2f} per sphere; "
+                f"{cs['n_isolated']} loose, {cs['n_under_coordinated']} with "
+                f"< {cs['min_stable_contacts']} contacts (of {cs['n_spheres']})")
+        return cs
+    except Exception as e:  # noqa: BLE001 — diagnostics must not break meshing
+        job.log(f"contact statistics unavailable: {e}")
+        return None
 
 
 def preview_job(job: Job, packing: str | Path, out_dir: str | Path,
@@ -99,12 +147,14 @@ def preview_job(job: Job, packing: str | Path, out_dir: str | Path,
     p = dict(params)
     p.setdefault("vox_mm", 1.0)
     p["base_name"] = "preview"
+    p["export_format"] = "3mf"     # the preview reads back written["3mf"]
 
     factor, dia_info = resolve_expansion(p.get("diameter", "stored"), packing,
                                          [float(x) for x in p.get("box_mm", [50, 50, 50])])
     p["expansion_factor"] = factor
     job.log(f"diameter mode {dia_info['mode']}: factor {factor:.6g}, "
             f"phi_realized {dia_info['phi_realized']}")
+    contacts = _contact_stats(packing, p, factor, job)
 
     cfg = RcpsConfig.from_dict(_config_dict(packing, out, p, prefer_backend="skimage"))
     job.log(f"meshing preview at vox={p['vox_mm']} mm ({cfg.mesh.backend}) ...")
@@ -130,6 +180,7 @@ def preview_job(job: Job, packing: str | Path, out_dir: str | Path,
         "surface_area_mm2": round(float(stats.surface_area_mm2), 1),
         "specific_surface_per_mm": round(float(stats.surface_area_mm2) / v_bulk, 4),
         "diameter": dia_info,
+        "contacts": contacts,
         "vox_mm": p["vox_mm"],
         "mesh_path": str(written["3mf"]),
     }

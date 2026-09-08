@@ -321,8 +321,16 @@ def run_facility(
             cfg_t = RcpsConfig.from_dict(d)
             log.info("tile type %s (%d copies): running pipeline ...", tag, len(positions))
             written = run(cfg_t)
-            entry["mesh"] = str(written["3mf"].name)
-            meshes[tag] = str(written["3mf"])
+            # .3mf is the default output, but out.save_3mf/save_stl are a
+            # per-job choice: record whichever mesh file was actually written.
+            mesh_path = written.get("3mf") or written.get("stl")
+            if mesh_path is None:  # pragma: no cover — OutConfig forbids this
+                raise RuntimeError(
+                    f"tile type {tag}: pipeline wrote no mesh file "
+                    f"(out.save_3mf and out.save_stl both off?)"
+                )
+            entry["mesh"] = str(mesh_path.name)
+            meshes[tag] = str(mesh_path)
         entries.append(entry)
 
     # ---- assembly map ----------------------------------------------------

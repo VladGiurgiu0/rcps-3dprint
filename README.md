@@ -40,9 +40,10 @@ see [References](#references).
   **Setup** (clone + build the packing generator automatically, point to an
   existing executable, load an existing `packing.xyzd`, or use Google Colab) →
   **Pack** (simulate; live 3D preview) → **Mesh** (fast coarse preview,
-  porosity and watertightness readout) → **Export** (production `.3mf`,
-  single tile or interlocking facility with an assembly map). Fully
-  on-device; every packing gets its own `output/run_*/` folder.
+  porosity, watertightness and contacts-per-sphere readout) → **Export**
+  (production `.3mf` and/or `.stl`, single tile or interlocking facility
+  with an assembly map). Fully on-device; every packing gets its own
+  `output/run_*/` folder.
 - **`rcps-build`** — single-tile CLI: YAML config in, `.3mf` + sidecars out.
 - **`rcps-facility`** — multi-tile orchestrator: derives the unique tile
   types of an N×M×K facility (e.g. 4·4·1 → 9 meshes for 16 tiles), meshes
@@ -136,9 +137,17 @@ box, `max(F_box, −F_beads)`, and is verified by a volume-partition test
 ### 3. Bridges
 
 A bare RCP lattice touches only at points and cannot be printed. At every
-contact (gap ≤ `contact_tol`, default 0.2 mm) a cylinder of radius
+contact (surface gap < `contact_tol`, default 0.2 mm) a cylinder of radius
 `radius_frac × min(r_i, r_j)` (default 0.15) is unioned into the field,
 adding ≲ 0.1% solid but making the lattice self-supporting.
+
+`contact_tol` is a per-job choice (Mesh stage in the GUI, `spheres.contact_tol_mm`
+in the config): it decides which pairs are close enough to be bridged. The mesh
+preview reports the resulting contacts per sphere at that tolerance, together
+with the number of spheres left with zero contacts (loose in the print) or fewer
+than four (`rcps.metrics.contact_stats`). This is deliberately distinct from the
+kissing number z reported in the Pack stage, which applies a *relative*
+tolerance to the as-jammed diameters to test the packing against RCP.
 
 ### 4. Tiles that interlock (`keep_sides`, facilities)
 
@@ -159,7 +168,8 @@ cubes (fast preview). CGAL quality knobs: `angbound` (min triangle angle),
 `radbound` (max triangle size, voxels), `distbound` (max surface deviation,
 voxels), `maxnode` (node cap). The mesh is repaired with **pymeshfix**,
 checked (watertightness, manifoldness, degenerate faces), and written as
-`.3mf` with two sidecars: `_info.txt` (human-readable) and `.config.json`
+`.3mf`, `.stl`, or both (`out.save_3mf` / `out.save_stl`; the GUI exposes the
+choice in the Export stage, `.3mf` by default) with two sidecars: `_info.txt` (human-readable) and `.config.json`
 (machine-readable: full config, `packing.xyzd` SHA-256, package version,
 timestamp) for exact reproducibility. Mesh size scales ∝ vox⁻², peak memory
 ∝ vox⁻³ (a guard refuses grids beyond ~5×10⁸ voxels); 0.1 mm voxels are the

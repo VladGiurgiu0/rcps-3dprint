@@ -51,8 +51,9 @@ class AppState:
             "pack_params": dict(packgen.DEFAULTS),
             "mesh_params": {"vox_mm": 1.0, "bridge_mode": "cylinders",
                             "radius_frac": 0.15, "export_what": "beads",
-                            "diameter": "stored"},
-            "export_params": {"vox_mm": 0.1, "grid": [1, 1, 1]},
+                            "diameter": "stored", "contact_tol_mm": 0.2},
+            "export_params": {"vox_mm": 0.1, "grid": [1, 1, 1],
+                              "export_format": "3mf"},
         }
         self._lock = threading.Lock()
         self._load()
@@ -126,8 +127,9 @@ class AppState:
         return {
             "pack": (cr / "packing.xyzd").exists(),
             "mesh": any((cr / "preview").glob("*.3mf")) if (cr / "preview").exists() else False,
-            "export": any((cr / "export").rglob("*.3mf"))
-                      or (cr / "export" / "facility_map.json").exists()
+            "export": (any((cr / "export").rglob("*.3mf"))
+                       or any((cr / "export").rglob("*.stl"))
+                       or (cr / "export" / "facility_map.json").exists())
                       if (cr / "export").exists() else False,
         }
 
@@ -292,7 +294,8 @@ def make_handler(state: AppState):  # noqa: C901 — routing table
                     state.data["mesh_params"] = {
                         k: params[k] for k in
                         ("vox_mm", "bridge_mode", "radius_frac",
-                         "export_what", "diameter", "backend", "iso2mesh")
+                         "export_what", "diameter", "backend", "iso2mesh",
+                         "contact_tol_mm")
                         if k in params}
                     state.save()
                     packing = state.packing_path
@@ -335,7 +338,8 @@ def make_handler(state: AppState):  # noqa: C901 — routing table
                     params["box_mm"] = state.data["pack_params"]["box_mm"]
                     params["d_nominal_mm"] = state.data["pack_params"]["d_nominal_mm"]
                     state.data["export_params"] = {
-                        "vox_mm": params["vox_mm"], "grid": params["grid"]}
+                        "vox_mm": params["vox_mm"], "grid": params["grid"],
+                        "export_format": params.get("export_format", "3mf")}
                     state.save()
                     packing = state.packing_path
 

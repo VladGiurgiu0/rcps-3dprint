@@ -388,6 +388,7 @@ function meshParams() {
     export_what: $("m-what").value,
     bridge_mode: $("m-bridge").value,
     radius_frac: parseFloat($("m-rf").value),
+    contact_tol_mm: parseFloat($("m-ctol").value),
     diameter: diameterChoice(),
     backend: $("m-backend").value,
     iso2mesh: {
@@ -414,7 +415,8 @@ $("btn-mesh").onclick = async () => {
           ` · printed d = <b>${r.diameter.mean_printed_diameter_mm} mm</b>` +
           (r.surface_area_mm2 ? ` · surface <b>${(r.surface_area_mm2 / 100).toFixed(1)} cm²</b>` +
             ` · specific surface <b>${r.specific_surface_per_mm.toFixed(3)} mm⁻¹</b>` : "") +
-          ` · watertight: <b class="${r.watertight ? "ok" : "err"}">${r.watertight}</b>`;
+          ` · watertight: <b class="${r.watertight ? "ok" : "err"}">${r.watertight}</b>` +
+          contactsLine(r.contacts);
         $("mesh-result").classList.remove("hidden");
         await showMesh($("view-mesh"), jj.id);
       },
@@ -422,6 +424,21 @@ $("btn-mesh").onclick = async () => {
     });
   } catch (e) { alertErr(e.message); }
 };
+
+/* Contacts at the chosen tolerance (rcps/metrics.py contact_stats): how many
+   pairs get bridged, and how many spheres are left loose or under-coordinated.
+   Distinct from the Pack stage's kissing number z, which uses a relative
+   tolerance on the as-jammed diameters to test the packing against RCP. */
+function contactsLine(c) {
+  if (!c) return "";
+  const loose = c.n_isolated
+    ? `<b class="err">${c.n_isolated}</b>` : `<b class="ok">0</b>`;
+  return ` · contacts/sphere <b>${c.contacts_per_sphere.toFixed(2)}</b>` +
+    ` at tol ${c.contact_tol_mm} mm (${c.n_contacts} pairs` +
+    ` · loose ${loose}` +
+    ` · &lt;${c.min_stable_contacts} contacts: ${c.n_under_coordinated}` +
+    `/${c.n_spheres})`;
+}
 
 /* ---------- Export stage: schematic + estimate ---------- */
 function gridVals() {
@@ -602,6 +619,7 @@ async function runExport(dry) {
     const j = await api.post("/api/export/run", {
       vox_mm: parseFloat($("e-vox").value),
       grid: gridVals(),
+      export_format: $("e-format").value,
       ...meshParams(),
       dry_run: dry,
     });
@@ -626,7 +644,9 @@ async function runExport(dry) {
 }
 $("btn-export").onclick = () => {
   const g = gridVals().join("·");
-  if (confirm(`Start full-resolution export (${g} grid)? This is a long run.`))
+  const fmt = { "3mf": ".3mf", stl: ".stl", both: ".3mf + .stl" }[$("e-format").value]
+    || ".3mf";
+  if (confirm(`Start full-resolution export (${g} grid, ${fmt})? This is a long run.`))
     runExport(false);
 };
 $("btn-export-dry").onclick = () => runExport(true);
@@ -646,6 +666,9 @@ $("btn-export-dry").onclick = () => runExport(true);
     if (pp.contraction_rate) $("p-cr").value = pp.contraction_rate;
     const mp = s.mesh_params || {};
     if (mp.backend) $("m-backend").value = mp.backend;
+    if (mp.contact_tol_mm != null) $("m-ctol").value = mp.contact_tol_mm;
+    const ep = s.export_params || {};
+    if (ep.export_format) $("e-format").value = ep.export_format;
     updateN();
     drawSchematic();
     await refreshStatus();

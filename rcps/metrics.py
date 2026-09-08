@@ -231,6 +231,63 @@ def coordination_number(
     }
 
 
+def contact_stats(
+    centers_mm: NDArray[np.float64],
+    diameters_mm: NDArray[np.float64],
+    box_mm: NDArray[np.float64] | list[float],
+    *,
+    contact_tol_mm: float,
+    expansion_factor: float = 1.0,
+    periodic: bool = True,
+) -> dict[str, Any]:
+    """Contacts under the ABSOLUTE gap criterion used by the bridge builder.
+
+    A pair ``(i, j)`` is a contact iff::
+
+        gap_ij = ||c_i - c_j|| - (R_i + R_j) < contact_tol_mm
+
+    with ``R_i = expansion_factor * d_i / 2`` — the same criterion as
+    :func:`rcps.bridges.find_contact_pairs`, evaluated here on the periodic
+    tile so every sphere sees its full neighbourhood.
+
+    Deliberately NOT :func:`coordination_number`: that one applies a
+    *relative* tolerance to the as-jammed diameters and answers "is this
+    packing RCP?".  This one answers "how many contacts exist at the
+    tolerance the user chose", i.e. which pairs the mesher will bridge, and
+    how many spheres are left loose (0 contacts) or under-coordinated
+    (< 4 contacts, not locally stable in 3D — cf. [1], Sec. II A).
+    """
+    c = np.asarray(centers_mm, dtype=np.float64)
+    r = np.asarray(diameters_mm, dtype=np.float64) * (0.5 * float(expansion_factor))
+    box = np.asarray(box_mm, dtype=np.float64)
+    n = int(c.shape[0])
+    tol = float(contact_tol_mm)
+    if n == 0:
+        raise ValueError("contact_stats: empty packing")
+
+    # pair distance at contact is ~d, so the search radius is d_max + tol
+    r_max = 2.0 * float(r.max()) + tol
+    i, j, dist = _pair_distances(c, box, r_max, periodic)
+    touch = (dist - r[i] - r[j]) < tol
+    i, j = i[touch], j[touch]
+
+    z = np.bincount(i, minlength=n) + np.bincount(j, minlength=n)
+    n_isolated = int((z == 0).sum())
+    n_under = int((z < MIN_STABLE_CONTACTS_3D).sum())
+    return {
+        "n_spheres": n,
+        "n_contacts": int(i.size),
+        "contacts_per_sphere": float(z.mean()),
+        "n_isolated": n_isolated,
+        "isolated_fraction": n_isolated / n,
+        "n_under_coordinated": n_under,
+        "under_coordinated_fraction": n_under / n,
+        "contact_tol_mm": tol,
+        "expansion_factor": float(expansion_factor),
+        "min_stable_contacts": MIN_STABLE_CONTACTS_3D,
+    }
+
+
 def rdf(
     centers_mm: NDArray[np.float64],
     diameters_mm: NDArray[np.float64],
