@@ -20,6 +20,7 @@ function show(stage) {
     document.querySelector(`.step[data-stage=${s}]`)
       .classList.toggle("active", s === stage);
   });
+  if (stage === "export") scheduleMediumCompare();
 }
 document.querySelectorAll(".step").forEach((b) =>
   b.addEventListener("click", () => show(b.dataset.stage)));
@@ -251,6 +252,7 @@ $("run-select").addEventListener("change", async () => {
     resetDerivedPanes();
     await refreshStatus();
     await refreshPackPreview();
+    scheduleMediumCompare();
   } catch (e) { alertErr(e.message); }
 });
 
@@ -683,6 +685,77 @@ document.querySelectorAll("#s-axis button").forEach((b) =>
     drawSlice();
   }));
 
+/* ---------- same medium as the run's other exports? (read-only) ---------- */
+let mediumTimer = null;
+function scheduleMediumCompare() {
+  clearTimeout(mediumTimer);
+  mediumTimer = setTimeout(refreshMediumCompare, 400);
+}
+const fmtVal = (k, v) => k === "packing_sha256" ? v.slice(0, 8) + "…" : v;
+async function refreshMediumCompare() {
+  const el = $("e-medium");
+  let r;
+  try {
+    r = await api.post("/api/export/compare",
+      { ...meshParams(), vox_mm: parseFloat($("e-vox").value) });
+  } catch (e) { el.classList.add("hidden"); return; }
+  const fs = r.folders || [];
+  if (!fs.length) { el.classList.add("hidden"); return; }
+  const src = (f) => f.source === "meshes" ? "meshes" : "dry-run plan";
+  el.innerHTML = fs.map((f, i) => {
+    const name = `<b>${f.folder}/</b>`;
+    const mixed = f.mixed ? " · <span class='warn'>its meshes have mixed settings, showing the first</span>" : "";
+    const btn = f.settings
+      ? `<button class="ghost" data-i="${i}">Use ${f.folder} settings</button>` : "";
+    const diffs = (f.diffs || []).map((d) =>
+      `${d.label} <b>${fmtVal(d.key, d.here)}</b> here vs <b>${fmtVal(d.key, d.there)}</b> there`
+    ).join("; ");
+    if (f.status === "unknown")
+      return `<p class="dim">${name} — medium settings not recorded (dry-run map ` +
+        `written before this check existed); open a mesh's .config.json to see them.</p>`;
+    if (f.status === "same")
+      return `<p><span class="ok">✓</span> same medium as ${name} ` +
+        `<span class="dim">(${src(f)}: ${f.summary})</span>${mixed}</p>`;
+    if (f.status === "accuracy")
+      return `<p><span class="warn">≈</span> same medium as ${name}, mesh accuracy ` +
+        `differs: ${diffs}${btn}${mixed}</p>`;
+    return `<p><span class="warn">⚠</span> differs from ${name} (${src(f)}): ` +
+      `${diffs}${btn}${mixed}</p>`;
+  }).join("");
+  el.querySelectorAll("button[data-i]").forEach((b) =>
+    b.addEventListener("click", () => applyMediumSettings(fs[+b.dataset.i])));
+  el.classList.remove("hidden");
+}
+function applyMediumSettings(f) {
+  const s = f.settings;
+  if (s.export_what) $("m-what").value = s.export_what;
+  if (s.bridge_mode) $("m-bridge").value = s.bridge_mode;
+  if (s.radius_frac != null) $("m-rf").value = s.radius_frac;
+  if (s.contact_tol_mm != null) $("m-ctol").value = s.contact_tol_mm;
+  if (s.vox_mm != null) $("e-vox").value = s.vox_mm;
+  if (s.backend && [...$("m-backend").options].some((o) => o.value === s.backend))
+    $("m-backend").value = s.backend;
+  const i2m = s.iso2mesh || {};
+  if (i2m.angbound_deg != null) $("a-ang").value = i2m.angbound_deg;
+  if (i2m.radbound != null) $("a-rad").value = i2m.radbound;
+  if (i2m.distbound != null) $("a-dist").value = i2m.distbound;
+  if (s.diameter) {
+    const r = document.querySelector(`input[name=dia][value=${s.diameter}]`);
+    if (r && !r.disabled) r.checked = true;
+  } else {
+    alert(`${f.folder}/ used a custom printed-diameter factor that the GUI ` +
+          `cannot select (only "as simulated" / "inflated to nominal d").`);
+  }
+  refreshMediumCompare();
+}
+["m-what", "m-bridge", "m-rf", "m-ctol", "m-backend", "a-ang", "a-rad", "a-dist",
+ "e-vox"].forEach((id) => {
+  $(id).addEventListener("input", scheduleMediumCompare);
+  $(id).addEventListener("change", scheduleMediumCompare);
+});
+document.querySelectorAll("input[name=dia]").forEach((r) =>
+  r.addEventListener("change", scheduleMediumCompare));
+
 async function runExport(dry) {
   try {
     if (isCyl() && !isFinite(columnSegments()))
@@ -709,6 +782,7 @@ async function runExport(dry) {
           if (!Object.keys(r.meshes).length) txt += "(dry run - no meshes)\n"; }
         $("export-files").textContent = txt || JSON.stringify(r, null, 2);
         $("export-result").classList.remove("hidden");
+        refreshMediumCompare();
       },
       onError: alertErr,
     });

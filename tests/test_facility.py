@@ -324,6 +324,70 @@ class TestColumnDryRun:
             run_facility(cfg, (2, 1, 1), out_dir=tmp_path / "bad", dry_run=True)
 
 
+class TestMediumRecord:
+    """What must match between exports of one packing (box vs cylinder)."""
+
+    def test_dry_run_map_records_the_medium(self, packing_xyzd_path, tmp_path):
+        import json
+
+        from rcps.io import sha256_of_file
+
+        cfg = _base_config(packing_xyzd_path, tmp_path)
+        res = run_facility(cfg, (2, 2, 1), diameter="design",
+                           out_dir=tmp_path / "m", dry_run=True)
+        med = json.loads(res["map_json"].read_text())["medium"]
+        assert med["packing_sha256"] == sha256_of_file(packing_xyzd_path)
+        assert abs(med["expansion_factor"] - 1.00674) < 5e-4      # resolved, not 1.0
+        assert (med["bridge_mode"], med["radius_frac"], med["contact_tol_mm"]) == \
+            ("cylinders", 0.15, 0.2)
+        assert med["vox_size_mm"] == 2.0 and med["backend"] == "skimage"
+
+    def test_mesh_sidecars_win_over_the_plan(self, packing_xyzd_path, tmp_path):
+        import json
+
+        from rcps.facility import recorded_medium
+
+        out = tmp_path / "exp"
+        run_facility(_base_config(packing_xyzd_path, tmp_path), (1, 1, 1),
+                     out_dir=out, dry_run=True)                      # plan: 0.15
+        cfg = _base_config(packing_xyzd_path, tmp_path).to_dict()
+        cfg["bridge"]["radius_frac"] = 0.10
+        side = {"config": cfg, "input": {"packing_sha256": "abc"}}
+        (out / "tile_keepS.config.json").write_text(json.dumps(side))
+        rec = recorded_medium(out)
+        assert rec["source"] == "meshes" and not rec["mixed"]
+        assert rec["medium"]["radius_frac"] == 0.10
+        cfg["bridge"]["radius_frac"] = 0.12
+        (out / "tile_keepI.config.json").write_text(json.dumps(side | {"config": cfg}))
+        assert recorded_medium(out)["mixed"]
+
+    def test_legacy_plan_and_missing_folder(self, tmp_path):
+        import json
+
+        from rcps.facility import recorded_medium
+
+        assert recorded_medium(tmp_path / "nope") is None
+        (tmp_path / "facility_map.json").write_text(json.dumps({"grid": [4, 1, 4]}))
+        assert recorded_medium(tmp_path) == {"source": "plan", "medium": None,
+                                             "mixed": False}
+
+    def test_compare_medium(self):
+        from rcps.facility import compare_medium
+
+        a = {"packing_sha256": "x", "expansion_factor": 1.0, "export_what": "beads",
+             "bridge_mode": "cylinders", "radius_frac": 0.10, "contact_tol_mm": 0.1,
+             "vox_size_mm": 0.1, "backend": "iso2mesh", "angbound_deg": 25,
+             "radbound": 1.0, "distbound": 0.1}
+        assert compare_medium(a, dict(a)) == []
+        d = compare_medium({**a, "radius_frac": 0.15, "vox_size_mm": 0.2}, a)
+        assert [(x["key"], x["kind"]) for x in d] == [
+            ("radius_frac", "medium"), ("vox_size_mm", "accuracy")]
+        # unknown on one side -> skipped; radius irrelevant without cylinders
+        assert compare_medium({**a, "packing_sha256": None}, {**a, "packing_sha256": "y"}) == []
+        none = {**a, "bridge_mode": "none"}
+        assert compare_medium({**none, "radius_frac": 0.3}, none) == []
+
+
 # =====================================================================
 # Tier 3 — gated 2×2×1 end-to-end at coarse vox (slow)
 # =====================================================================

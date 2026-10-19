@@ -66,7 +66,7 @@ import numpy as np
 
 from rcps._version import __version__
 from rcps.config import RcpsConfig
-from rcps.io import load_packing_xyzd
+from rcps.io import load_packing_xyzd, sha256_of_file
 
 log = logging.getLogger(__name__)
 
@@ -304,6 +304,100 @@ def resolve_expansion_factor(
 
 
 # =====================================================================
+# Printed-medium record (what must match between exports of one packing)
+# =====================================================================
+
+# Settings that define the printed medium itself (must match for "the same
+# medium"), and settings that only set the mesh accuracy (should match).
+# Container settings (shape, D, flow axis, segment, grid) are meant to differ
+# between e.g. a box facility and a cylinder column and are not listed.
+MEDIUM_KEYS: tuple[str, ...] = (
+    "packing_sha256", "expansion_factor", "export_what",
+    "bridge_mode", "radius_frac", "contact_tol_mm",
+)
+ACCURACY_KEYS: tuple[str, ...] = (
+    "vox_size_mm", "backend", "angbound_deg", "radbound", "distbound",
+)
+
+
+def medium_from_config(
+    cfg: dict[str, Any], packing_sha256: str | None = None
+) -> dict[str, Any]:
+    """Medium + accuracy settings from an ``RcpsConfig.to_dict()`` dict."""
+    sph, br, mesh = cfg["spheres"], cfg["bridge"], cfg.get("mesh", {})
+    i2m = mesh.get("iso2mesh", {})
+    return {
+        "packing_sha256": packing_sha256,
+        "expansion_factor": round(float(sph["expansion_factor"]), 6),
+        "export_what": cfg["field"]["export_what"],
+        "bridge_mode": br["mode"],
+        "radius_frac": float(br["radius_frac"]),
+        "contact_tol_mm": float(sph["contact_tol_mm"]),
+        "vox_size_mm": float(cfg["grid"]["vox_size_mm"]),
+        "backend": mesh.get("backend"),
+        "angbound_deg": i2m.get("angbound_deg"),
+        "radbound": i2m.get("radbound"),
+        "distbound": i2m.get("distbound"),
+    }
+
+
+def recorded_medium(folder: Path) -> dict[str, Any] | None:
+    """Medium settings recorded in an export folder, or ``None``.
+
+    Meshes are the ground truth: their ``*.config.json`` sidecars are read
+    first (this also covers folders exported before the map carried a
+    ``medium`` block). Without meshes, the ``medium`` block of
+    ``facility_map.json`` (a dry-run plan) is used. Returns
+    ``{"source": "meshes"|"plan", "medium": {...}, "mixed": bool}``.
+    """
+    folder = Path(folder)
+    if not folder.is_dir():
+        return None
+    found: list[dict[str, Any]] = []
+    for f in sorted(folder.glob("*.config.json")):
+        try:
+            d = json.loads(f.read_text())
+            found.append(medium_from_config(
+                d["config"], (d.get("input") or {}).get("packing_sha256")))
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            continue
+    if found:
+        mixed = any(m != found[0] for m in found[1:])
+        return {"source": "meshes", "medium": found[0], "mixed": mixed}
+    fm = folder / "facility_map.json"
+    if fm.exists():
+        try:
+            med = json.loads(fm.read_text()).get("medium")
+        except (OSError, json.JSONDecodeError):
+            med = None
+        if med:
+            return {"source": "plan", "medium": med, "mixed": False}
+        return {"source": "plan", "medium": None, "mixed": False}
+    return None
+
+
+def compare_medium(here: dict[str, Any], there: dict[str, Any]) -> list[dict[str, Any]]:
+    """Differences between two medium records (keys missing on either side,
+    or not applicable to the bridge mode, are skipped)."""
+    out = []
+    for key in MEDIUM_KEYS + ACCURACY_KEYS:
+        a, b = here.get(key), there.get(key)
+        if a is None or b is None:
+            continue
+        if key == "radius_frac" and "cylinders" not in (here.get("bridge_mode"),
+                                                         there.get("bridge_mode")):
+            continue
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+            same = abs(float(a) - float(b)) <= 1e-9 * max(1.0, abs(float(a)))
+        else:
+            same = a == b
+        if not same:
+            out.append({"key": key, "here": a, "there": b,
+                        "kind": "medium" if key in MEDIUM_KEYS else "accuracy"})
+    return out
+
+
+# =====================================================================
 # Orchestrator
 # =====================================================================
 
@@ -440,6 +534,10 @@ def run_facility(
             "segment_periods": config.geom.segment_periods,
         },
         "diameter": dia_info,
+        "medium": medium_from_config(
+            {**base, "spheres": {**base["spheres"], "expansion_factor": factor}},
+            packing_sha256=sha256_of_file(config.paths.packing),
+        ),
         "dry_run": dry_run,
         "n_tiles": n_tiles,
         "n_unique_types": len(types),

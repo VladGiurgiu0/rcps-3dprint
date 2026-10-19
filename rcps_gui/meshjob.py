@@ -330,8 +330,12 @@ def export_job(job: Job, packing: str | Path, out_dir: str | Path,
     out = Path(out_dir) / EXPORT_DIRS.get(p.get("shape") or "box", "export_box")
     p.setdefault("vox_mm", 0.1)
     if p.get("dry_run") and p.get("backend") in (None, "auto"):
-        # a dry run never meshes — don't require a meshing backend
-        p["backend"] = "skimage"
+        # a dry run never meshes — don't require a meshing backend, but
+        # record the one a real export would use (it goes into the map)
+        try:
+            p["backend"] = _backend("iso2mesh")
+        except ImportError:
+            p["backend"] = "skimage"
     grid = [int(x) for x in p.get("grid", [1, 1, 1])]
     box = [float(x) for x in p.get("box_mm", [50, 50, 50])]
     diameter = p.get("diameter", "stored")
@@ -374,3 +378,90 @@ def export_job(job: Job, packing: str | Path, out_dir: str | Path,
             "diameter": dia_info,
             "out_dir": str(out),
         }
+
+
+# ---------------------------------------------------------------------
+# Same medium as the other exports of this run?
+# ---------------------------------------------------------------------
+
+_LABELS = {
+    "packing_sha256": "packing file", "expansion_factor": "printed-diameter factor",
+    "export_what": "beads/pore", "bridge_mode": "bridges",
+    "radius_frac": "bridge radius", "contact_tol_mm": "contact tolerance [mm]",
+    "vox_size_mm": "production voxel [mm]", "backend": "mesher",
+    "angbound_deg": "angbound", "radbound": "radbound", "distbound": "distbound",
+}
+
+
+def _gui_settings(med: dict[str, Any], packing: Path, box: list[float]) -> dict[str, Any]:
+    """Recorded medium -> GUI field values ("Use those settings")."""
+    f = float(med.get("expansion_factor", 1.0))
+    diameter = None
+    if abs(f - 1.0) < 1e-6:
+        diameter = "stored"
+    else:
+        try:
+            fd, _ = resolve_expansion("design", packing, box)
+            if abs(fd - f) < 1e-5:
+                diameter = "design"
+        except (FileNotFoundError, ValueError):
+            pass
+    backend = med.get("backend")
+    try:
+        if backend == _backend("iso2mesh"):
+            backend = "auto"            # 'auto' already exports with it
+    except ImportError:
+        pass
+    return {
+        "export_what": med.get("export_what"), "bridge_mode": med.get("bridge_mode"),
+        "radius_frac": med.get("radius_frac"), "contact_tol_mm": med.get("contact_tol_mm"),
+        "diameter": diameter, "vox_mm": med.get("vox_size_mm"), "backend": backend,
+        "iso2mesh": {k: med.get(k) for k in ("angbound_deg", "radbound", "distbound")},
+    }
+
+
+def compare_exports(run_dir: str | Path, packing: str | Path,
+                    params: dict[str, Any]) -> list[dict[str, Any]]:
+    """Compare the current Mesh/Export settings with every export folder of
+    the run (legacy ``export/`` included). Read-only; never blocks."""
+    from rcps.config import RcpsConfig
+    from rcps.facility import compare_medium, medium_from_config, recorded_medium
+    from rcps.io import sha256_of_file
+
+    run_dir, packing = Path(run_dir), Path(packing)
+    p = dict(params)
+    box = [float(x) for x in p.get("box_mm", [50, 50, 50])]
+    if p.get("backend") in (None, "auto"):
+        try:
+            p["backend"] = _backend("iso2mesh")
+        except ImportError:
+            p["backend"] = "skimage"
+    p["expansion_factor"], _ = resolve_expansion(p.get("diameter", "stored"), packing, box)
+    cfg = RcpsConfig.from_dict(_config_dict(packing, run_dir, p))
+    here = medium_from_config(cfg.to_dict(), sha256_of_file(packing))
+
+    out = []
+    for name in ("export", *EXPORT_DIRS.values()):
+        rec = recorded_medium(run_dir / name)
+        if rec is None:
+            continue
+        item: dict[str, Any] = {"folder": name, "source": rec["source"],
+                                "mixed": rec["mixed"], "diffs": [], "settings": None}
+        if rec["medium"] is None:
+            item["status"] = "unknown"
+        else:
+            diffs = compare_medium(here, rec["medium"])
+            for d in diffs:
+                d["label"] = _LABELS.get(d["key"], d["key"])
+            item["diffs"] = diffs
+            item["status"] = ("same" if not diffs else
+                              "differs" if any(d["kind"] == "medium" for d in diffs)
+                              else "accuracy")
+            item["settings"] = _gui_settings(rec["medium"], packing, box)
+            item["summary"] = (
+                f"bridges {rec['medium']['bridge_mode']} {rec['medium']['radius_frac']:g}, "
+                f"tol {rec['medium']['contact_tol_mm']:g} mm, "
+                f"d x{rec['medium']['expansion_factor']:g}, "
+                f"vox {rec['medium']['vox_size_mm']:g} mm, {rec['medium']['backend']}")
+        out.append(item)
+    return out

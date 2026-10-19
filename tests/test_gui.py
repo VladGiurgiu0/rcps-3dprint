@@ -236,6 +236,34 @@ class TestApiSmoke:
         assert Path(jb["result"]["map_txt"]).parent.name == "export_box"
         assert "packing X axis" in Path(j["result"]["map_txt"]).read_text()
 
+    def test_compare_with_other_exports(self, gui_server, packing_xyzd_path):
+        base, _ = gui_server
+        _post(f"{base}/api/use_example", {"source": str(packing_xyzd_path)})
+        assert _post(f"{base}/api/export/compare", {})["folders"] == []
+        job = _post(f"{base}/api/export/run",
+                    {"grid": [4, 1, 4], "diameter": "stored", "dry_run": True,
+                     "vox_mm": 0.1, "shape": "box", "radius_frac": 0.10,
+                     "contact_tol_mm": 0.10})
+        for _ in range(200):
+            j = _get(f"{base}/api/job/{job['id']}")
+            if j["status"] in ("done", "error"):
+                break
+            time.sleep(0.05)
+        assert j["status"] == "done", j.get("error")
+
+        cyl = {"shape": "cylinder", "flow_axis": "z", "segment_periods": 1,
+               "diameter": "stored", "vox_mm": 0.1, "contact_tol_mm": 0.10}
+        same = _post(f"{base}/api/export/compare", {**cyl, "radius_frac": 0.10})["folders"]
+        assert [(f["folder"], f["status"]) for f in same] == [("export_box", "same")]
+        diff = _post(f"{base}/api/export/compare", {**cyl, "radius_frac": 0.15})["folders"][0]
+        assert diff["status"] == "differs"
+        assert [d["key"] for d in diff["diffs"]] == ["radius_frac"]
+        assert diff["settings"]["radius_frac"] == 0.10
+        assert diff["settings"]["diameter"] == "stored"
+        acc = _post(f"{base}/api/export/compare",
+                    {**cyl, "radius_frac": 0.10, "vox_mm": 0.2})["folders"][0]
+        assert acc["status"] == "accuracy"
+
     def test_unknown_job_404(self, gui_server):
         base, _ = gui_server
         with pytest.raises(urllib.error.HTTPError):

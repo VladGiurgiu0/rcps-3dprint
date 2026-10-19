@@ -270,3 +270,11 @@ details.advanced[open] summary::before { content: "▾ "; }
 .mtable th { text-align: left; color: var(--muted); font-weight: 600;
   padding: 4px 14px 4px 0; border-bottom: 1px solid var(--line); }
 .mtable td { padding: 4px 14px 4px 0; border-bottom: 1px solid var(--line); }
+
+/* same-medium check across the run's export folders (Export stage) */
+.medium { margin: 4px 0 14px; padding: 10px 14px; border-radius: 12px;
+  background: #f5f5f7; font-size: 12.5px; line-height: 1.6; }
+.medium p { margin: 2px 0; }
+.medium .warn { color: #b25000; font-weight: 600; }
+.medium .dim { color: var(--muted); }
+.medium button { font-size: 12px; padding: 2px 10px; margin-left: 6px; }

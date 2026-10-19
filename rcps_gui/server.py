@@ -360,6 +360,18 @@ def make_handler(state: AppState):  # noqa: C901 — routing table
 
                     self._json(state.jobs.start("export", _target).to_dict())
 
+                elif path == "/api/export/compare":
+                    run_dir = state.current_run_path
+                    if run_dir is None or not state.packing_path.exists():
+                        self._json({"folders": []})
+                        return
+                    params = {**state.data["mesh_params"],
+                              **state.data["export_params"], **body}
+                    params["box_mm"] = state.data["pack_params"]["box_mm"]
+                    params["d_nominal_mm"] = state.data["pack_params"]["d_nominal_mm"]
+                    self._json({"folders": meshjob.compare_exports(
+                        run_dir, state.packing_path, params)})
+
                 elif path.startswith("/api/job/") and path.endswith("/cancel"):
                     job = state.jobs.get(path.split("/")[3])
                     if job is None:
