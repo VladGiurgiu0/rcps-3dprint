@@ -53,6 +53,42 @@ class TestGeomConfig:
             GeomConfig(tile_size_mm=[10, 10, 10], target_porosity=-0.1)
 
 
+class TestGeomConfigShape:
+
+    def test_defaults_are_box_z_one_period(self):
+        g = GeomConfig(tile_size_mm=[50, 50, 50])
+        assert (g.shape, g.flow_axis, g.segment_periods) == ("box", "z", 1)
+        assert g.cylinder_diameter_mm is None
+        assert g.segment_size_mm == (50.0, 50.0, 50.0)
+
+    def test_cylinder_default_diameter_is_cross_section(self):
+        g = GeomConfig(tile_size_mm=[50, 50, 50], shape="cylinder",
+                       flow_axis="X", segment_periods=3)
+        assert g.flow_axis == "x"
+        assert g.segment_size_mm == (50.0, 50.0, 150.0)
+        assert g.effective_cylinder_diameter_mm == 50.0
+
+    @pytest.mark.parametrize("bad", [
+        {"shape": "sphere"}, {"flow_axis": "w"}, {"segment_periods": 0},
+        {"segment_periods": 1.5}, {"cylinder_diameter_mm": -1.0},
+        {"cylinder_diameter_mm": 50.5},
+    ])
+    def test_rejects_bad_geometry(self, bad):
+        with pytest.raises(ValueError):
+            GeomConfig(tile_size_mm=[50, 50, 50], **bad)
+
+    def test_cylinder_only_allows_cap_keep_sides(self):
+        base = {
+            "paths": {"packing": "x.xyzd"},
+            "geom": {"tile_size_mm": [50, 50, 50], "shape": "cylinder"},
+            "spheres": {"diameter_mm": 6.0},
+        }
+        ok = RcpsConfig.from_dict({**base, "field": {"keep_sides": ["I", "S"]}})
+        assert ok.field.keep_sides == ["I", "S"]
+        with pytest.raises(ValueError):
+            RcpsConfig.from_dict({**base, "field": {"keep_sides": ["R"]}})
+
+
 class TestSpheresConfig:
 
     def test_defaults(self):

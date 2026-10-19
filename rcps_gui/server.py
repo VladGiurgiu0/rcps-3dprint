@@ -51,9 +51,11 @@ class AppState:
             "pack_params": dict(packgen.DEFAULTS),
             "mesh_params": {"vox_mm": 1.0, "bridge_mode": "cylinders",
                             "radius_frac": 0.15, "export_what": "beads",
-                            "diameter": "stored", "contact_tol_mm": 0.2},
+                            "diameter": "stored", "contact_tol_mm": 0.2,
+                            "shape": "box", "cylinder_diameter_mm": None,
+                            "flow_axis": "z", "segment_periods": 1},
             "export_params": {"vox_mm": 0.1, "grid": [1, 1, 1],
-                              "export_format": "3mf"},
+                              "export_format": "3mf", "column_length_mm": 1000.0},
         }
         self._lock = threading.Lock()
         self._load()
@@ -295,7 +297,8 @@ def make_handler(state: AppState):  # noqa: C901 — routing table
                         k: params[k] for k in
                         ("vox_mm", "bridge_mode", "radius_frac",
                          "export_what", "diameter", "backend", "iso2mesh",
-                         "contact_tol_mm")
+                         "contact_tol_mm", "shape", "cylinder_diameter_mm",
+                         "flow_axis", "segment_periods")
                         if k in params}
                     state.save()
                     packing = state.packing_path
@@ -339,7 +342,8 @@ def make_handler(state: AppState):  # noqa: C901 — routing table
                     params["d_nominal_mm"] = state.data["pack_params"]["d_nominal_mm"]
                     state.data["export_params"] = {
                         "vox_mm": params["vox_mm"], "grid": params["grid"],
-                        "export_format": params.get("export_format", "3mf")}
+                        "export_format": params.get("export_format", "3mf"),
+                        "column_length_mm": params.get("column_length_mm", 1000.0)}
                     state.save()
                     packing = state.packing_path
 

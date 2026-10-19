@@ -206,6 +206,26 @@
       and porosity included. Production resolution happens in Export.</p>
     </header>
     <div class="card">
+      <p><strong>Printed piece</strong></p>
+      <div class="grid2">
+        <label><span class="lbl">Shape
+          <span class="tip" data-tip="box = flush-cut cuboid tile (square duct, HRL cell). cylinder = round cut for a pipe; the cylinder axis is the flow axis below. Walls are cut through the beads in both cases, so wall porosity equals bulk porosity.">ⓘ</span></span>
+          <select id="m-shape"><option value="box" selected>box (flush-cut tile)</option>
+            <option value="cylinder">cylinder (round pipe)</option></select>
+        </label>
+        <label><span class="lbl">Cylinder diameter D [mm]
+          <span class="tip" data-tip="Outer diameter of the printed cylinder. Leave empty for the packing box size (e.g. 50 mm). Set it slightly below the measured pipe ID to fit — the radial gap is a bypass channel, keep it small.">ⓘ</span></span>
+          <input id="m-cyl-d" type="number" step="0.05" min="1" placeholder="= box edge"></label>
+        <label><span class="lbl">Flow / print axis
+          <span class="tip" data-tip="Which axis of the packing becomes the cylinder (flow) axis. The packing is rotated (never mirrored) so this axis points along the printer's z. Use the axis that was vertical in your other experiment to keep the same orientation of the medium.">ⓘ</span></span>
+          <select id="m-axis"><option value="z" selected>packing z</option>
+            <option value="x">packing x</option><option value="y">packing y</option></select>
+        </label>
+        <label><span class="lbl">Segment length
+          <span class="tip" data-tip="Length of one printed piece along the flow axis, in whole packing periods (multiples of the box edge). Consecutive segments interlock; each one is a single print.">ⓘ</span></span>
+          <select id="m-seg"></select>
+        </label>
+      </div>
       <div class="grid2">
         <label><span class="lbl">Preview voxel [mm]
           <span class="tip" data-tip="Grid resolution for the quick preview. Coarser = faster but blockier (1.0 mm ≈ a minute; 0.5 mm is finer but several minutes). Geometry quality at production resolution is set in Export, not here.">ⓘ</span></span>
@@ -279,8 +299,9 @@
   <!-- ============ 4 · EXPORT ============ -->
   <section id="stage-export" class="stage">
     <header><h2>Export</h2>
-      <p>Full-resolution printable mesh (.3mf or .stl). A single tile, or a
-      whole facility of interlocking tiles with an assembly map.</p>
+      <p>Full-resolution printable mesh (.3mf or .stl). A single tile, a
+      whole facility of interlocking tiles, or (cylinder shape) a column of
+      interlocking segments — with an assembly map.</p>
       <p class="muted">Mesher, bridges, printed-diameter choice and the advanced
       meshing options are taken from step <strong>3 · Mesh</strong> — only the
       resolution and the facility grid are set here.</p>
@@ -333,7 +354,7 @@
             <option value="both">both (.3mf + .stl)</option>
           </select>
         </label>
-        <label><span class="lbl">Facility grid (x · y · z tiles)
+        <label id="e-grid-wrap"><span class="lbl">Facility grid (x · y · z tiles)
           <span class="tip" data-tip="How many copies of the tile to assemble per axis. Interior faces interlock (each sphere prints on exactly one tile); exterior faces are cut flush. Only the unique tile types are meshed — e.g. 4·4·1 needs 9 meshes for 16 tiles.">ⓘ</span></span>
           <span class="row tight">
             <input id="e-gx" type="number" value="1" min="1" style="width:4.2em">
@@ -341,6 +362,9 @@
             <input id="e-gz" type="number" value="1" min="1" style="width:4.2em">
           </span>
         </label>
+        <label id="e-col-wrap" class="hidden"><span class="lbl">Column length [mm]
+          <span class="tip" data-tip="Total length of the porous column (cylinder shape). Must be a whole multiple of the segment length set in Mesh. Segments interlock end to end; at most three meshes are needed (bottom, middle, top).">ⓘ</span></span>
+          <input id="e-col" type="number" value="1000" min="1" step="50"></label>
       </div>
       <div class="schematic-wrap">
         <div id="e-schematic"></div>

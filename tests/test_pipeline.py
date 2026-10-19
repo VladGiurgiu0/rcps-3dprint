@@ -148,6 +148,46 @@ class TestPipelineRunSkimage:
 
 
 @pytest.mark.skipif(
+    not (HAS_SKIMAGE and HAS_TRIMESH and HAS_PYMESHFIX),
+    reason="scikit-image + trimesh + pymeshfix required",
+)
+class TestPipelineRunCylinder:
+
+    def test_cylinder_segment_along_x_two_periods(self, packing_xyzd_path, tmp_path):
+        """Round 100 mm segment built along packing x: upright (axis = z),
+        inside D, flush caps, porosity of the cylinder ≈ bulk porosity."""
+        import json
+
+        import numpy as np
+
+        from rcps.mesh import diagnose
+        from rcps.pipeline import run
+        from tests._mesh_metrics import load_3mf
+
+        c = _example_config(
+            packing_xyzd_path, tmp_path,
+            geom={"shape": "cylinder", "flow_axis": "x", "segment_periods": 2,
+                  "cylinder_diameter_mm": 48.0},
+            grid={"vox_size_mm": 1.0},
+            mesh={"backend": "skimage"},
+        )
+        written = run(c)
+        V, F = load_3mf(Path(written["3mf"]))
+        stats = diagnose(V, F)
+        assert stats.watertight, stats.summary_line()
+        rho = np.hypot(V[:, 0] - 25.0, V[:, 1] - 25.0)
+        assert 23.0 < rho.max() < 24.0 + 1.0
+        assert -1.0 < V[:, 2].min() < 1.0 and 99.0 < V[:, 2].max() < 101.0
+        import trimesh
+        vol = abs(trimesh.Trimesh(V, F, process=False).volume)
+        phi = 1.0 - vol / (np.pi / 4 * 48.0 ** 2 * 100.0)
+        assert 0.32 < phi < 0.40, phi
+        rt = json.loads(Path(written["config_json"]).read_text())["runtime"]
+        assert rt["segment_size_mm"] == [50.0, 50.0, 100.0]
+        assert rt["shape"] == "cylinder" and rt["cylinder_diameter_mm"] == 48.0
+
+
+@pytest.mark.skipif(
     not (HAS_ISO2MESH and HAS_TRIMESH and HAS_PYMESHFIX),
     reason="iso2mesh + trimesh + pymeshfix required",
 )

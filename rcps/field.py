@@ -11,6 +11,12 @@ Conventions
   beads at that face" — used when the tile dovetails with a neighbouring tile.
 - All 3D scalar fields are stored as ``float32`` (matches MATLAB ``single``).
   1D coordinate vectors and 1D sphere arrays stay ``float64``.
+- Container shape: :func:`build_box_sdf` (cuboid, default) or
+  :func:`build_cylinder_sdf` (round cut about z). Both return the outer
+  container SDF consumed unchanged by :func:`compose_field`.
+- :func:`orient_and_stack` (step 0) relabels the packing so the chosen flow
+  axis is z and stacks segment periods along z; the downstream steps only
+  ever see the resulting periodic segment.
 
 Sign conventions for the SDF::
 
@@ -107,6 +113,76 @@ class Grid:
 
     def z_vec(self) -> NDArray[np.float64]:
         return self.origin[2] + np.arange(self.nz, dtype=np.float64) * self.vox_size
+
+
+# =====================================================================
+# 0. Orient the packing along the flow axis and stack segment periods
+# =====================================================================
+
+# Cyclic axis permutations (proper rotations, det = +1 — never a mirror
+# image, so the printed medium is the same realization as the packing).
+# new_coord[:, k] = old_coord[:, _AXIS_PERM[flow_axis][k]]; the chosen
+# packing axis always lands on the printed z axis.
+_AXIS_PERM: dict[str, tuple[int, int, int]] = {
+    "z": (0, 1, 2),   # identity
+    "x": (1, 2, 0),   # (x, y, z)_new = (y, z, x)_packing
+    "y": (2, 0, 1),   # (x, y, z)_new = (z, x, y)_packing
+}
+
+
+def segment_size(
+    tile_size_mm: tuple[float, float, float] | Sequence[float],
+    flow_axis: str = "z",
+    segment_periods: int = 1,
+) -> tuple[float, float, float]:
+    """Printed-segment size: the tile relabeled for ``flow_axis``, ×n along z."""
+    if flow_axis not in _AXIS_PERM:
+        raise ValueError(f"flow_axis must be one of {sorted(_AXIS_PERM)}, got {flow_axis!r}")
+    if int(segment_periods) < 1:
+        raise ValueError(f"segment_periods must be >= 1, got {segment_periods}")
+    p = _AXIS_PERM[flow_axis]
+    t = [float(tile_size_mm[i]) for i in p]
+    return (t[0], t[1], t[2] * int(segment_periods))
+
+
+def orient_and_stack(
+    centers: NDArray[np.float64],
+    diameters: NDArray[np.float64],
+    tile_size_mm: tuple[float, float, float] | Sequence[float],
+    *,
+    flow_axis: str = "z",
+    segment_periods: int = 1,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], tuple[float, float, float]]:
+    """Turn the periodic packing into the periodic *segment* packing.
+
+    1. Relabel axes so packing axis ``flow_axis`` becomes z (cyclic
+       permutation = proper rotation).
+    2. Stack ``segment_periods`` copies along z. A packing that is periodic
+       with period ``P`` is also periodic with ``n·P``, so the result is an
+       exactly periodic packing of size ``(Px, Py, n·Pz)`` and every
+       downstream step (ghosts, grid, SDF, bridges, keep-sides ownership)
+       runs unchanged on it.
+
+    The defaults (``"z"``, ``1``) return the inputs untouched (same array
+    objects), so the default pipeline output is bit-identical.
+    """
+    seg = segment_size(tile_size_mm, flow_axis, segment_periods)
+    if flow_axis == "z" and int(segment_periods) == 1:
+        return centers, diameters, seg
+
+    c = np.asarray(centers, dtype=np.float64)[:, list(_AXIS_PERM[flow_axis])]
+    d = np.asarray(diameters, dtype=np.float64)
+    n = int(segment_periods)
+    if n > 1:
+        shifts = np.zeros((n, 3), dtype=np.float64)
+        shifts[:, 2] = np.arange(n, dtype=np.float64) * (seg[2] / n)
+        c = (shifts[:, None, :] + c[None, :, :]).reshape(-1, 3)   # copy k = rows k·N..
+        d = np.tile(d, n)
+    log.info(
+        "orient_and_stack: flow axis %s -> z, %d period(s) -> segment %s mm, %d spheres",
+        flow_axis, n, seg, c.shape[0],
+    )
+    return c, d, seg
 
 
 # =====================================================================
@@ -419,6 +495,62 @@ def build_box_sdf(grid: Grid, *, max_radius_mm: float, band_vox: int = 3) -> NDA
     inside = np.minimum(np.maximum(np.maximum(QX, QY), QZ), np.float32(0.0))
     F_box = outside + inside
     return F_box.astype(np.float32, copy=False)
+
+
+def build_cylinder_sdf(
+    grid: Grid,
+    diameter_mm: float,
+    *,
+    max_radius_mm: float,
+    band_vox: int = 3,
+) -> NDArray[np.float32]:
+    """Signed distance to a capped cylinder — drop-in for :func:`build_box_sdf`.
+
+    Axis along z through ``(L/2, H/2)``; caps at ``z = 0`` and ``z = W``.
+    Like the box, a cap listed in ``grid.keep_sides`` (``I`` / ``S``) is
+    pushed outside the grid so beads protrude uncut for axial
+    interlocking; the round wall always cuts. Exact Euclidean distance::
+
+        q_r = sqrt((x-L/2)^2 + (y-H/2)^2) - D/2,   q_z = |z - z_c| - h/2
+        F   = min(max(q_r, q_z), 0) + ||(max(q_r, 0), max(q_z, 0))||
+
+    Raises if the cylinder does not fit the tile cross-section or if a
+    lateral face (L/R/P/A) is kept.
+    """
+    L, H, W = grid.tile_size
+    R = 0.5 * float(diameter_mm)
+    if R <= 0:
+        raise ValueError(f"diameter_mm must be positive, got {diameter_mm}")
+    if 2.0 * R > min(L, H) + 1e-9:
+        raise ValueError(
+            f"cylinder diameter {diameter_mm} mm exceeds the tile cross-section "
+            f"{min(L, H)} mm"
+        )
+    lateral = [s for s in grid.keep_sides if s not in ("I", "S")]
+    if lateral:
+        raise ValueError(f"keep_sides {lateral} are not cylinder faces (only I/S)")
+
+    vox = grid.vox_size
+    band_dist = max(2, int(band_vox)) * vox
+    ext_mm = 2.0 * (max_radius_mm + band_dist) + 2.0 * vox
+    zmin, zmax = 0.0, W
+    if "I" in grid.keep_sides:
+        zmin -= ext_mm
+    if "S" in grid.keep_sides:
+        zmax += ext_mm
+    cz, hz = 0.5 * (zmin + zmax), 0.5 * (zmax - zmin)
+
+    dx = (grid.x_vec() - 0.5 * L).astype(np.float32).reshape(-1, 1, 1)
+    dy = (grid.y_vec() - 0.5 * H).astype(np.float32).reshape(1, -1, 1)
+    QR = np.sqrt(dx * dx + dy * dy) - np.float32(R)                       # (nx, ny, 1)
+    QZ = (np.abs(grid.z_vec() - cz) - hz).astype(np.float32).reshape(1, 1, -1)
+
+    QRp = np.maximum(QR, np.float32(0.0))
+    QZp = np.maximum(QZ, np.float32(0.0))
+    outside = np.sqrt(QRp * QRp + QZp * QZp)
+    inside = np.minimum(np.maximum(QR, QZ), np.float32(0.0))
+    F_cyl = outside + inside
+    return F_cyl.astype(np.float32, copy=False)
 
 
 # =====================================================================

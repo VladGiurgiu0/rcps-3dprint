@@ -76,7 +76,13 @@ def _config_dict(packing: Path, out_dir: Path, p: dict[str, Any],
             "root": str(packing.parent),
             "out_dir": str(out_dir),
         },
-        "geom": {"tile_size_mm": box},
+        "geom": {
+            "tile_size_mm": box,
+            "shape": p.get("shape") or "box",
+            "cylinder_diameter_mm": p.get("cylinder_diameter_mm") or None,
+            "flow_axis": p.get("flow_axis") or "z",
+            "segment_periods": int(p.get("segment_periods") or 1),
+        },
         "spheres": {
             "diameter_mm": float(p.get("d_nominal_mm", 6.0)),
             "expansion_factor": float(p.get("expansion_factor", 1.0)),
@@ -170,7 +176,7 @@ def preview_job(job: Job, packing: str | Path, out_dir: str | Path,
         struct.pack("<II", V.shape[0], F.shape[0])
         + V.tobytes() + F.tobytes()
     )
-    v_bulk = float(np.prod(p.get("box_mm", [50, 50, 50])))
+    v_bulk = _bulk_volume(cfg)
     job.result = {
         "n_vertices": int(V.shape[0]),
         "n_faces": int(F.shape[0]),
@@ -183,7 +189,20 @@ def preview_job(job: Job, packing: str | Path, out_dir: str | Path,
         "contacts": contacts,
         "vox_mm": p["vox_mm"],
         "mesh_path": str(written["3mf"]),
+        "shape": cfg.geom.shape,
+        "segment_size_mm": list(cfg.geom.segment_size_mm),
+        "cylinder_diameter_mm": (cfg.geom.effective_cylinder_diameter_mm
+                                 if cfg.geom.shape == "cylinder" else None),
     }
+
+
+def _bulk_volume(cfg: Any) -> float:
+    """Bulk (container) volume of one printed segment, mm³ — porosity basis."""
+    seg = cfg.geom.segment_size_mm
+    if cfg.geom.shape == "cylinder":
+        D = cfg.geom.effective_cylinder_diameter_mm
+        return float(np.pi / 4.0 * D * D * seg[2])
+    return float(np.prod(seg))
 
 
 def sdf_job(job: Job, packing: str | Path, params: dict[str, Any]) -> None:
@@ -195,13 +214,16 @@ def sdf_job(job: Job, packing: str | Path, params: dict[str, Any]) -> None:
     choice, bridges, beads/pore.
     """
     from rcps.bridges import add_cylinders, expand_to_touch
+    from rcps.config import GeomConfig
     from rcps.field import (
         apply_keepsides_filter,
         build_beads_sdf_icsg,
         build_box_sdf,
+        build_cylinder_sdf,
         compose_field,
         cull_spheres,
         make_grid,
+        orient_and_stack,
         replicate_with_ghost_tiles,
     )
     from rcps.io import load_packing_xyzd
@@ -216,18 +238,27 @@ def sdf_job(job: Job, packing: str | Path, params: dict[str, Any]) -> None:
 
     factor, dia_info = resolve_expansion(p.get("diameter", "stored"), packing, box)
     job.log(f"field at vox={vox} mm, diameter mode {dia_info['mode']} "
-            f"(x{factor:.6g}), bridges={bridge_mode}, export={export_what}")
+            f"(x{factor:.6g}), bridges={bridge_mode}, export={export_what}, "
+            f"shape={p.get('shape') or 'box'}")
 
+    geom = GeomConfig(
+        tile_size_mm=tuple(box), shape=p.get("shape") or "box",
+        cylinder_diameter_mm=p.get("cylinder_diameter_mm") or None,
+        flow_axis=p.get("flow_axis") or "z",
+        segment_periods=int(p.get("segment_periods") or 1),
+    )
     S = load_packing_xyzd(packing)
-    centers, diameters = replicate_with_ghost_tiles(
-        S[:, :3], S[:, 3], tuple(box), 1)
+    c0, d0, seg = orient_and_stack(S[:, :3], S[:, 3], tuple(box),
+                                   flow_axis=geom.flow_axis,
+                                   segment_periods=geom.segment_periods)
+    centers, diameters = replicate_with_ghost_tiles(c0, d0, seg, 1)
     radii = (diameters / 2.0) * factor
     if bridge_mode == "diameter":
         radii = expand_to_touch(centers, radii,
                                 contact_tol_mm=float(p.get("contact_tol_mm", 0.2)))
     max_radius = float(radii.max())
 
-    grid = make_grid(tuple(box), vox, pad_vox=1, band_vox=band_vox)
+    grid = make_grid(seg, vox, pad_vox=1, band_vox=band_vox)
     band_dist = max(2, band_vox) * grid.vox_size
     centers, radii, _ = cull_spheres(centers, radii, grid, band_dist=band_dist)
     centers, radii, _ = apply_keepsides_filter(centers, radii, grid)
@@ -241,7 +272,11 @@ def sdf_job(job: Job, packing: str | Path, params: dict[str, Any]) -> None:
             radius_frac=float(p.get("radius_frac", 0.15)),
             band_vox=band_vox,
         )
-    F_box = build_box_sdf(grid, max_radius_mm=max_radius, band_vox=band_vox)
+    if geom.shape == "cylinder":
+        F_box = build_cylinder_sdf(grid, geom.effective_cylinder_diameter_mm,
+                                   max_radius_mm=max_radius, band_vox=band_vox)
+    else:
+        F_box = build_box_sdf(grid, max_radius_mm=max_radius, band_vox=band_vox)
     F = compose_field(F_beads, F_box, export_what)
 
     job.volume = np.ascontiguousarray(F, dtype=np.float32)
@@ -249,7 +284,7 @@ def sdf_job(job: Job, packing: str | Path, params: dict[str, Any]) -> None:
         "shape": [int(grid.nx), int(grid.ny), int(grid.nz)],
         "vox_mm": float(grid.vox_size),
         "origin_mm": [float(x) for x in grid.origin],
-        "box_mm": box,
+        "box_mm": list(seg),
         "range": [round(float(F.min()), 4), round(float(F.max()), 4)],
         "diameter": dia_info,
         "export_what": export_what,
@@ -318,7 +353,8 @@ def export_job(job: Job, packing: str | Path, out_dir: str | Path,
 
         cfg = RcpsConfig.from_dict(_config_dict(packing, out, p,
                                                 prefer_backend="iso2mesh"))
-        job.log(f"facility {grid[0]}x{grid[1]}x{grid[2]} at vox={p['vox_mm']} mm "
+        what = ("column" if cfg.geom.shape == "cylinder" else "facility")
+        job.log(f"{what} {grid[0]}x{grid[1]}x{grid[2]} at vox={p['vox_mm']} mm "
                 f"- one meshing run per unique tile type ...")
         res = run_facility(cfg, grid, diameter=diameter, out_dir=out,
                            dry_run=bool(p.get("dry_run", False)))

@@ -47,6 +47,8 @@ VALID_EXPORT_WHAT = frozenset({"beads", "pore"})
 VALID_BRIDGE_MODES = frozenset({"none", "cylinders", "diameter"})
 VALID_MESH_BACKENDS = frozenset({"iso2mesh", "skimage"})
 VALID_KEEP_SIDES = frozenset({"L", "R", "P", "A", "I", "S"})
+VALID_SHAPES = frozenset({"box", "cylinder"})
+VALID_FLOW_AXES = frozenset({"x", "y", "z"})
 
 
 # =====================================================================
@@ -70,12 +72,54 @@ class PathsConfig:
 
 @dataclass
 class GeomConfig:
-    """Tile geometry."""
+    """Tile geometry.
+
+    ``tile_size_mm`` is the periodic packing domain (the packing-generation
+    box). The printed piece (a "segment") is derived from it:
+
+    - ``flow_axis``: packing axis that becomes the printed z axis (cylinder
+      axis / print direction). Applied as a cyclic relabeling of the packing
+      coordinates — a proper rotation, never a mirror image.
+    - ``segment_periods``: segment length along that axis in packing
+      periods (1 → one tile, 2 → twice as long, ...).
+    - ``shape``: ``"box"`` (flush-cut cuboid, the default) or
+      ``"cylinder"`` (round cut about the segment's z axis).
+    - ``cylinder_diameter_mm``: cylinder diameter; ``None`` → the
+      segment's cross-section size (``min`` of its x/y extent).
+
+    Defaults reproduce the pre-cylinder pipeline exactly.
+    """
 
     tile_size_mm: tuple[float, float, float]
     target_porosity: float = 0.35  # informational
+    shape: str = "box"
+    cylinder_diameter_mm: float | None = None
+    flow_axis: str = "z"
+    segment_periods: int = 1
 
     def __post_init__(self) -> None:
+        if self.shape not in VALID_SHAPES:
+            raise ValueError(
+                f"geom.shape must be one of {sorted(VALID_SHAPES)}, got {self.shape!r}"
+            )
+        self.flow_axis = str(self.flow_axis).lower()
+        if self.flow_axis not in VALID_FLOW_AXES:
+            raise ValueError(
+                f"geom.flow_axis must be one of {sorted(VALID_FLOW_AXES)}, "
+                f"got {self.flow_axis!r}"
+            )
+        if int(self.segment_periods) != self.segment_periods or self.segment_periods < 1:
+            raise ValueError(
+                f"geom.segment_periods must be an integer >= 1, got {self.segment_periods!r}"
+            )
+        self.segment_periods = int(self.segment_periods)
+        if self.cylinder_diameter_mm is not None:
+            self.cylinder_diameter_mm = float(self.cylinder_diameter_mm)
+            if self.cylinder_diameter_mm <= 0:
+                raise ValueError(
+                    f"geom.cylinder_diameter_mm must be positive, "
+                    f"got {self.cylinder_diameter_mm}"
+                )
         # YAML loads tuples as lists; coerce.
         t = tuple(float(x) for x in self.tile_size_mm)
         if len(t) != 3:
@@ -89,6 +133,31 @@ class GeomConfig:
             raise ValueError(
                 f"geom.target_porosity must lie in [0, 1), got {self.target_porosity}"
             )
+        if self.cylinder_diameter_mm is not None:
+            cross = min(self.segment_size_mm[:2])
+            if self.cylinder_diameter_mm > cross + 1e-9:
+                raise ValueError(
+                    f"geom.cylinder_diameter_mm={self.cylinder_diameter_mm} exceeds the "
+                    f"segment cross-section ({cross} mm); the cylinder must fit "
+                    f"inside the periodic packing tile"
+                )
+
+    @property
+    def segment_size_mm(self) -> tuple[float, float, float]:
+        """Size of the printed segment: the oriented tile, stacked along z.
+
+        Same axis relabeling as :func:`rcps.field.orient_and_stack`.
+        """
+        from rcps.field import segment_size  # noqa: PLC0415 — avoid import cycle
+
+        return segment_size(self.tile_size_mm, self.flow_axis, self.segment_periods)
+
+    @property
+    def effective_cylinder_diameter_mm(self) -> float:
+        """Cylinder diameter actually used (default: segment cross-section)."""
+        if self.cylinder_diameter_mm is not None:
+            return float(self.cylinder_diameter_mm)
+        return float(min(self.segment_size_mm[:2]))
 
 
 @dataclass
@@ -276,6 +345,18 @@ class RcpsConfig:
     # built programmatically). Used for diagnostics in the sidecars.
     _source_yaml: Path | None = dc_field(default=None, repr=False, compare=False)
 
+    def __post_init__(self) -> None:
+        # Cross-section checks. A cylinder has only two flat faces (its
+        # caps at z = 0 and z = segment length), so only those can be kept
+        # for axial interlocking.
+        if self.geom.shape == "cylinder":
+            bad = [s for s in self.field.keep_sides if s not in ("I", "S")]
+            if bad:
+                raise ValueError(
+                    f"field.keep_sides {bad} not allowed with geom.shape='cylinder' "
+                    f"(only the end caps I/S can interlock)"
+                )
+
     # ---------------------------------------------------------------
     # Constructors
     # ---------------------------------------------------------------
@@ -388,6 +469,8 @@ __all__ = [
     "SpheresConfig",
     "VALID_BRIDGE_MODES",
     "VALID_EXPORT_WHAT",
+    "VALID_FLOW_AXES",
     "VALID_KEEP_SIDES",
     "VALID_MESH_BACKENDS",
+    "VALID_SHAPES",
 ]

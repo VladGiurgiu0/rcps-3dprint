@@ -5,6 +5,7 @@ single per-tile pipeline and writes the .3mf plus the two reproducibility
 sidecars. Order of operations (locked in the archived design audit §6):
 
     load packing
+        → orient_and_stack                    [geom.flow_axis, geom.segment_periods]
         → (optional) expand_to_touch          [bridge.mode == 'diameter']
         → ghost-tile replication
         → apply expansion_factor
@@ -13,7 +14,7 @@ sidecars. Order of operations (locked in the archived design audit §6):
         → apply_keepsides_filter
         → build_beads_sdf_icsg
         → (optional) add_cylinders             [bridge.mode == 'cylinders']
-        → build_box_sdf
+        → build_box_sdf | build_cylinder_sdf   [geom.shape]
         → compose_field
         → mesh_iso2mesh / mesh_skimage
         → repair_and_finalize
@@ -39,9 +40,11 @@ from rcps.field import (
     apply_keepsides_filter,
     build_beads_sdf_icsg,
     build_box_sdf,
+    build_cylinder_sdf,
     compose_field,
     cull_spheres,
     make_grid,
+    orient_and_stack,
     replicate_with_ghost_tiles,
 )
 from rcps.io import (
@@ -107,12 +110,20 @@ def run(config: RcpsConfig) -> dict[str, Path]:
         S.shape[0], float(diameters0[0]),
     )
 
+    # Flow axis -> z, stack segment periods (no-op for the defaults). From
+    # here on the periodic tile is the printed segment.
+    centers0, diameters0, tile_size = orient_and_stack(
+        centers0, diameters0, config.geom.tile_size_mm,
+        flow_axis=config.geom.flow_axis,
+        segment_periods=config.geom.segment_periods,
+    )
+
     # -------------------------------------------------------------
     # 2. Ghost-tile replication
     # -------------------------------------------------------------
     centers, diameters = replicate_with_ghost_tiles(
         centers0, diameters0,
-        tile_size_mm=config.geom.tile_size_mm,
+        tile_size_mm=tile_size,
         ghost_tiles=config.field.ghost_tiles,
     )
     radii = (diameters / 2.0) * config.spheres.expansion_factor
@@ -144,7 +155,7 @@ def run(config: RcpsConfig) -> dict[str, Path]:
     # 4. Build padded SDF grid
     # -------------------------------------------------------------
     grid = make_grid(
-        config.geom.tile_size_mm,
+        tile_size,
         config.grid.vox_size_mm,
         pad_vox=config.field.pad_vox,
         band_vox=config.field.band_vox,
@@ -178,12 +189,18 @@ def run(config: RcpsConfig) -> dict[str, Path]:
             radius_frac=config.bridge.radius_frac,
             band_vox=config.field.band_vox,
         )
-    F_box = build_box_sdf(grid, max_radius_mm=max_radius, band_vox=config.field.band_vox)
+    if config.geom.shape == "cylinder":
+        F_box = build_cylinder_sdf(
+            grid, config.geom.effective_cylinder_diameter_mm,
+            max_radius_mm=max_radius, band_vox=config.field.band_vox,
+        )
+    else:
+        F_box = build_box_sdf(grid, max_radius_mm=max_radius, band_vox=config.field.band_vox)
     F = compose_field(F_beads, F_box, config.field.export_what)
     log.info(
-        "step 6/9 SDF built in %.2f s (bridge.mode=%r, export_what=%r)",
+        "step 6/9 SDF built in %.2f s (shape=%r, bridge.mode=%r, export_what=%r)",
         time.perf_counter() - t_field,
-        config.bridge.mode, config.field.export_what,
+        config.geom.shape, config.bridge.mode, config.field.export_what,
     )
 
     # -------------------------------------------------------------
@@ -230,6 +247,11 @@ def run(config: RcpsConfig) -> dict[str, Path]:
     elapsed = time.perf_counter() - t_start
     runtime: dict[str, Any] = {
         "snapped_vox_size_mm": float(grid.vox_size),
+        "segment_size_mm": [float(x) for x in tile_size],
+        "shape": config.geom.shape,
+        "cylinder_diameter_mm": (config.geom.effective_cylinder_diameter_mm
+                                 if config.geom.shape == "cylinder" else None),
+        "flow_axis": config.geom.flow_axis,
         "grid_dims": list(grid.shape),
         "grid_origin_mm": list(grid.origin),
         "iso_level": float(iso_level),

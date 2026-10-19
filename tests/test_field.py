@@ -9,10 +9,13 @@ from rcps.field import (
     apply_keepsides_filter,
     build_beads_sdf_icsg,
     build_box_sdf,
+    build_cylinder_sdf,
     compose_field,
     cull_spheres,
     make_grid,
+    orient_and_stack,
     replicate_with_ghost_tiles,
+    segment_size,
     snap_grid,
 )
 
@@ -453,3 +456,141 @@ class TestEndToEndOnDataExample:
         n_box = int((F_box < 0).sum())
         # Solid + pore ≈ box (small surface-voxel overlap allowed).
         assert abs(n_solid + n_pore - n_box) < 0.02 * n_box, (n_solid, n_pore, n_box)
+
+
+# =====================================================================
+# orient_and_stack / segment_size (flow axis + segment length)
+# =====================================================================
+
+class TestOrientAndStack:
+
+    def test_defaults_return_inputs_untouched(self):
+        c = np.random.default_rng(0).random((7, 3)) * 50
+        d = np.full(7, 6.0)
+        c2, d2, seg = orient_and_stack(c, d, (50, 50, 50))
+        assert c2 is c and d2 is d          # bit-identical default pipeline
+        assert seg == (50.0, 50.0, 50.0)
+
+    @pytest.mark.parametrize("axis,src", [("x", 0), ("y", 1), ("z", 2)])
+    def test_flow_axis_lands_on_z(self, axis, src):
+        c = np.random.default_rng(1).random((9, 3)) * 50
+        c2, _, _ = orient_and_stack(c, np.ones(9), (50, 50, 50), flow_axis=axis)
+        np.testing.assert_allclose(c2[:, 2], c[:, src])
+
+    @pytest.mark.parametrize("axis", ["x", "y", "z"])
+    def test_relabel_is_a_proper_rotation(self, axis):
+        """Cyclic permutation: distances AND handedness preserved (no mirror)."""
+        c = np.array([[0.0, 0, 0], [1, 0, 0], [0, 2, 0], [0, 0, 3]])
+        c2, _, _ = orient_and_stack(c, np.ones(4), (50, 50, 50), flow_axis=axis)
+        v, w = c[1:] - c[0], c2[1:] - c2[0]
+        assert np.sign(np.linalg.det(v)) == np.sign(np.linalg.det(w))
+        np.testing.assert_allclose(np.linalg.norm(w, axis=1), np.linalg.norm(v, axis=1))
+
+    def test_anisotropic_tile_size_is_permuted(self):
+        assert segment_size((10, 20, 30), "x") == (20.0, 30.0, 10.0)
+        assert segment_size((10, 20, 30), "y") == (30.0, 10.0, 20.0)
+        assert segment_size((10, 20, 30), "z", 3) == (10.0, 20.0, 90.0)
+
+    def test_stacking_copies_along_z(self):
+        c = np.random.default_rng(2).random((5, 3)) * 50
+        c2, d2, seg = orient_and_stack(c, np.arange(5.0), (50, 50, 50), segment_periods=3)
+        assert c2.shape == (15, 3) and d2.shape == (15,) and seg == (50.0, 50.0, 150.0)
+        for k in range(3):
+            np.testing.assert_allclose(c2[5 * k:5 * (k + 1)], c + [0, 0, 50.0 * k])
+            np.testing.assert_allclose(d2[5 * k:5 * (k + 1)], np.arange(5.0))
+
+    def test_stacked_packing_is_periodic_with_segment_length(self, packing_xyzd_path):
+        """Ghosts of the stacked segment == ghosts of the original tile in
+        the same window: the segment is the same infinite periodic medium."""
+        from rcps.io import load_packing_xyzd
+
+        S = load_packing_xyzd(packing_xyzd_path)
+        c2, d2, seg = orient_and_stack(S[:, :3], S[:, 3], (50, 50, 50), segment_periods=2)
+        a, _ = replicate_with_ghost_tiles(c2, d2, seg, 1)
+        b, _ = replicate_with_ghost_tiles(S[:, :3], S[:, 3], (50, 50, 50), 2)
+        win = lambda p: p[(p[:, 2] > -5) & (p[:, 2] < 105)  # noqa: E731
+                          & (np.abs(p[:, 0] - 25) < 30) & (np.abs(p[:, 1] - 25) < 30)]
+        A = np.unique(np.round(win(a), 6), axis=0)
+        B = np.unique(np.round(win(b), 6), axis=0)
+        assert A.shape == B.shape
+        np.testing.assert_allclose(A, B, atol=1e-6)
+
+    def test_invalid_inputs_raise(self):
+        with pytest.raises(ValueError):
+            segment_size((50, 50, 50), "w")
+        with pytest.raises(ValueError):
+            segment_size((50, 50, 50), "z", 0)
+
+
+# =====================================================================
+# build_cylinder_sdf
+# =====================================================================
+
+def _idx(vec, v):
+    return int(np.argmin(np.abs(vec - v)))
+
+
+class TestBuildCylinderSdf:
+
+    def test_exact_distances(self):
+        g = make_grid((50, 50, 50), 1.0, pad_vox=1)
+        F = build_cylinder_sdf(g, 50.0, max_radius_mm=3.0)
+        x, y, z = g.x_vec(), g.y_vec(), g.z_vec()
+        # on the axis, mid-height: nearest surface is the wall, 25 mm away
+        assert F[_idx(x, 25), _idx(y, 25), _idx(z, 25)] == pytest.approx(-25.0)
+        # inside, near a cap: cap is nearer than the wall
+        assert F[_idx(x, 25), _idx(y, 25), _idx(z, 2)] == pytest.approx(-2.0)
+        # tile corner (outside radially): rho - R
+        assert F[_idx(x, 0), _idx(y, 0), _idx(z, 25)] == pytest.approx(
+            np.hypot(25, 25) - 25, abs=1e-5)
+        # below the bottom cap and outside radially: Euclidean corner distance
+        assert F[_idx(x, -1), _idx(y, 25), _idx(z, -1)] == pytest.approx(
+            np.hypot(1, 1), abs=1e-5)
+        assert F.dtype == np.float32
+
+    def test_smaller_diameter_is_centred(self):
+        g = make_grid((50, 50, 50), 1.0, pad_vox=1)
+        F = build_cylinder_sdf(g, 40.0, max_radius_mm=3.0)
+        x, y, z = g.x_vec(), g.y_vec(), g.z_vec()
+        for xv, yv in [(5, 25), (45, 25), (25, 5), (25, 45)]:
+            assert F[_idx(x, xv), _idx(y, yv), _idx(z, 25)] == pytest.approx(0.0, abs=1e-5)
+
+    def test_kept_caps_extend_beyond_grid(self):
+        g = make_grid((50, 50, 50), 1.0, pad_vox=1, keep_sides=["I", "S"], max_radius_mm=3.0)
+        F = build_cylinder_sdf(g, 50.0, max_radius_mm=3.0)
+        ix, iy = _idx(g.x_vec(), 25), _idx(g.y_vec(), 25)
+        assert (F[ix, iy, :] < 0).all()                   # no cap inside the grid
+        assert F[_idx(g.x_vec(), 0), _idx(g.y_vec(), 0), 0] > 0   # wall still cuts
+
+    def test_volume_matches_analytic(self):
+        g = make_grid((50, 50, 50), 0.5, pad_vox=1)
+        F = build_cylinder_sdf(g, 50.0, max_radius_mm=3.0)
+        v = float((F <= 0).sum()) * g.vox_size ** 3
+        assert v == pytest.approx(np.pi / 4 * 50 ** 2 * 50, rel=0.02)
+
+    def test_rejects_lateral_keep_sides_and_oversize(self):
+        g = make_grid((50, 50, 50), 2.0, keep_sides=["L"], max_radius_mm=3.0)
+        with pytest.raises(ValueError):
+            build_cylinder_sdf(g, 50.0, max_radius_mm=3.0)
+        g = make_grid((50, 50, 50), 2.0)
+        with pytest.raises(ValueError):
+            build_cylinder_sdf(g, 50.5, max_radius_mm=3.0)
+
+    @pytest.mark.parametrize("axis", ["x", "y", "z"])
+    def test_cylinder_porosity_matches_bulk(self, packing_xyzd_path, axis):
+        """Delesse: a cut through a statistically homogeneous medium keeps
+        the bulk porosity, curved or flat — the round cut must not bias it."""
+        from rcps.io import load_packing_xyzd
+
+        S = load_packing_xyzd(packing_xyzd_path)
+        c, d, seg = orient_and_stack(S[:, :3], S[:, 3], (50, 50, 50), flow_axis=axis)
+        c, d = replicate_with_ghost_tiles(c, d, seg, 1)
+        r = d / 2.0
+        g = make_grid(seg, 1.0, pad_vox=1)
+        c, r, _ = cull_spheres(c, r, g, band_dist=3 * g.vox_size)
+        F_beads = build_beads_sdf_icsg(c, r, g, band_vox=3)
+        F_cyl = build_cylinder_sdf(g, 50.0, max_radius_mm=float(r.max()))
+        F_box = build_box_sdf(g, max_radius_mm=float(r.max()))
+        phi_cyl = 1.0 - (compose_field(F_beads, F_cyl, "beads") < 0).sum() / (F_cyl < 0).sum()
+        phi_box = 1.0 - (compose_field(F_beads, F_box, "beads") < 0).sum() / (F_box < 0).sum()
+        assert abs(phi_cyl - phi_box) < 0.01, (phi_cyl, phi_box)

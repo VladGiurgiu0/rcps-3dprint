@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from rcps.facility import (
+    column_segments,
     derive_keep_sides,
     design_expansion_factor,
     parse_nfo_final_porosity,
@@ -200,7 +201,7 @@ class TestDiameterConvention:
 # Tier 2 — dry-run orchestration (no meshing)
 # =====================================================================
 
-def _base_config(packing_path, out_dir):
+def _base_config(packing_path, out_dir, **geom):
     from rcps.config import RcpsConfig
 
     return RcpsConfig.from_dict({
@@ -209,7 +210,7 @@ def _base_config(packing_path, out_dir):
             "root": str(packing_path.parent),
             "out_dir": str(out_dir),
         },
-        "geom": {"tile_size_mm": [50, 50, 50]},
+        "geom": {"tile_size_mm": [50, 50, 50], **geom},
         "spheres": {"diameter_mm": 6.0, "expansion_factor": 1.0,
                     "contact_tol_mm": 0.2},
         "grid": {"vox_size_mm": 2.0},
@@ -249,6 +250,50 @@ class TestDryRun:
                            out_dir=tmp_path / "fac1", dry_run=True)
         assert res["n_types"] == 1 and res["n_tiles"] == 1
         assert "flush" in res["map_txt"].read_text()
+
+
+class TestColumnDryRun:
+
+    def test_column_segments(self):
+        assert column_segments(1000, 50) == 20
+        assert column_segments(1000, 200) == 5
+        for bad in [(1000, 150), (0, 50), (40, 50)]:
+            with pytest.raises(ValueError):
+                column_segments(*bad)
+
+    def test_1000mm_column_needs_three_meshes(self, packing_xyzd_path, tmp_path):
+        import json
+
+        cfg = _base_config(packing_xyzd_path, tmp_path, shape="cylinder", flow_axis="x")
+        res = run_facility(cfg, (1, 1, 20), diameter="stored",
+                           out_dir=tmp_path / "col", dry_run=True)
+        assert res["n_types"] == 3 and res["n_tiles"] == 20
+        amap = json.loads(res["map_json"].read_text())
+        assert amap["facility_size_mm"] == [50.0, 50.0, 1000.0]
+        assert amap["geometry"] == {"shape": "cylinder", "cylinder_diameter_mm": 50.0,
+                                    "flow_axis": "x", "segment_periods": 1}
+        copies = {t["tag"]: t["copies"] for t in amap["tile_types"]}
+        assert copies == {"keepS": 1, "keepIS": 18, "keepI": 1}
+        txt = res["map_txt"].read_text()
+        assert "packing X axis" in txt and "bottom" in txt and "top" in txt
+
+    def test_segment_periods_set_the_tile(self, packing_xyzd_path, tmp_path):
+        import json
+
+        cfg = _base_config(packing_xyzd_path, tmp_path, shape="cylinder",
+                           segment_periods=4, cylinder_diameter_mm=49.8)
+        res = run_facility(cfg, (1, 1, 5), diameter="stored",
+                           out_dir=tmp_path / "col4", dry_run=True)
+        amap = json.loads(res["map_json"].read_text())
+        assert amap["tile_size_mm"] == [50.0, 50.0, 200.0]
+        assert amap["facility_size_mm"] == [50.0, 50.0, 1000.0]
+        assert amap["packing_period_mm"] == [50.0, 50.0, 50.0]
+        assert amap["geometry"]["cylinder_diameter_mm"] == 49.8
+
+    def test_cylinder_rejects_lateral_grid(self, packing_xyzd_path, tmp_path):
+        cfg = _base_config(packing_xyzd_path, tmp_path, shape="cylinder")
+        with pytest.raises(ValueError):
+            run_facility(cfg, (2, 1, 1), out_dir=tmp_path / "bad", dry_run=True)
 
 
 # =====================================================================
@@ -302,3 +347,34 @@ class TestFacility2x2x1EndToEnd:
                 assert L - 1.0 < ymax < L + 1.0, (tag, ymax)
             # z faces are all exterior in a 2x2x1 grid -> flush
             assert -1.0 < zmin < 1.0 and L - 1.0 < zmax < L + 1.0, (tag, zmin, zmax)
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    not (HAS_TRIMESH and HAS_PYMESHFIX and HAS_SKIMAGE),
+    reason="trimesh + pymeshfix + scikit-image required",
+)
+class TestColumnEndToEnd:
+
+    def test_three_segment_column(self, packing_xyzd_path, tmp_path):
+        """1×1×3 cylinder column at vox=1: bottom/middle/top meshes are
+        watertight, stay inside the cylinder radially, protrude past kept
+        caps and are flush at the cut caps."""
+        from rcps.mesh import diagnose
+        from tests._mesh_metrics import load_3mf
+
+        cfg = _base_config(packing_xyzd_path, tmp_path, shape="cylinder")
+        cfg.grid.vox_size_mm = 1.0
+        res = run_facility(cfg, (1, 1, 3), diameter="stored",
+                           out_dir=tmp_path / "col3", dry_run=False)
+        assert set(res["meshes"]) == {"keepS", "keepIS", "keepI"}
+        for tag, path in res["meshes"].items():
+            V, F = load_3mf(Path(path))
+            stats = diagnose(V, F)
+            assert stats.watertight, f"{tag}: {stats.summary_line()}"
+            rho = np.hypot(V[:, 0] - 25.0, V[:, 1] - 25.0)
+            assert rho.max() < 25.0 + 1.0, (tag, rho.max())     # round wall cuts
+            assert rho.max() > 24.0, (tag, rho.max())            # and reaches it
+            zmin, zmax = V[:, 2].min(), V[:, 2].max()
+            assert (zmin < -0.5) if "I" in tag else (-1.0 < zmin < 1.0), (tag, zmin)
+            assert (zmax > 50.5) if "S" in tag else (49.0 < zmax < 51.0), (tag, zmax)

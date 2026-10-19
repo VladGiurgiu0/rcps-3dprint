@@ -205,6 +205,24 @@ class TestApiSmoke:
         assert j["result"]["n_types"] == 4
         assert Path(j["result"]["map_txt"]).exists()
 
+    def test_cylinder_column_dry_run_export(self, gui_server, packing_xyzd_path):
+        base, state = gui_server
+        _post(f"{base}/api/use_example", {"source": str(packing_xyzd_path)})
+        job = _post(f"{base}/api/export/run",
+                    {"grid": [1, 1, 20], "diameter": "stored", "dry_run": True,
+                     "vox_mm": 0.1, "shape": "cylinder", "flow_axis": "x",
+                     "segment_periods": 1, "cylinder_diameter_mm": None,
+                     "column_length_mm": 1000})
+        for _ in range(200):
+            j = _get(f"{base}/api/job/{job['id']}")
+            if j["status"] in ("done", "error"):
+                break
+            time.sleep(0.05)
+        assert j["status"] == "done", j.get("error")
+        assert j["result"]["n_types"] == 3 and j["result"]["n_tiles"] == 20
+        assert "packing X axis" in Path(j["result"]["map_txt"]).read_text()
+        assert state.data["export_params"]["column_length_mm"] == 1000
+
     def test_unknown_job_404(self, gui_server):
         base, _ = gui_server
         with pytest.raises(urllib.error.HTTPError):

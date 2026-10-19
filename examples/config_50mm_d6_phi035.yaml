@@ -12,6 +12,10 @@ paths:
 geom:
   tile_size_mm: [50.0, 50.0, 50.0]      # MUST match the packing-generation domain
   target_porosity: 0.35                  # informational; the actual porosity comes from packing.xyzd
+  shape: box                             # 'box' | 'cylinder' (round cut about the segment z axis)
+  # cylinder_diameter_mm: 49.8           # cylinder only; default = segment cross-section (50)
+  flow_axis: z                           # packing axis that becomes the printed z / cylinder axis
+  segment_periods: 1                     # segment length along z, in packing periods
 
 spheres:
   diameter_mm: 6.0

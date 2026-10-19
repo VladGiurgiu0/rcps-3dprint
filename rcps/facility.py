@@ -22,6 +22,17 @@ meshes (4 corner types, 4 edge types, 1 interior type) for its 16 tiles.
 The orchestrator runs the pipeline once per unique type and writes an
 assembly map saying which mesh goes at which grid position.
 
+Columns (round pipes)
+---------------------
+With ``geom.shape == "cylinder"`` the facility is a ``1 × 1 × K`` column
+of segments stacked along the cylinder axis (the packing's
+``geom.flow_axis``, relabeled to z). Only the end caps interlock, so a
+column needs at most three meshes — bottom (flat inlet face), middle,
+top (flat outlet face) — whatever K is. The tile of the grid is the
+printed *segment* (``geom.segment_size_mm``: packing period ×
+``geom.segment_periods`` along z); :func:`column_segments` converts a
+column length into K.
+
 Diameter convention
 -------------------
 (Audited 2026-06-11 against ``notebooks/packing_generation.ipynb``.) For
@@ -120,6 +131,25 @@ def unique_tile_types(
 def type_tag(keep_sides: tuple[str, ...]) -> str:
     """Short filesystem-safe tag for a keep-sides set."""
     return "flush" if not keep_sides else "keep" + "".join(keep_sides)
+
+
+def column_segments(column_length_mm: float, segment_length_mm: float) -> int:
+    """Number of segments K in a column; the length must be a whole multiple."""
+    if column_length_mm <= 0 or segment_length_mm <= 0:
+        raise ValueError(
+            f"lengths must be positive, got column={column_length_mm}, "
+            f"segment={segment_length_mm}"
+        )
+    k = round(column_length_mm / segment_length_mm)
+    if k < 1 or abs(k * segment_length_mm - column_length_mm) > 1e-6:
+        raise ValueError(
+            f"column length {column_length_mm} mm is not a whole multiple of the "
+            f"segment length {segment_length_mm} mm"
+        )
+    return int(k)
+
+
+_COLUMN_ROLE = {("S",): "bottom", ("I", "S"): "middle", ("I",): "top", (): "single"}
 
 
 # =====================================================================
@@ -274,7 +304,12 @@ def run_facility(
     ``n_tiles``.
     """
     g = _validate_grid(grid)
+    if config.geom.shape == "cylinder" and (g[0] != 1 or g[1] != 1):
+        raise ValueError(
+            f"a cylinder facility is a 1x1xK column, got grid {list(g)}"
+        )
     base = config.to_dict()
+    seg = config.geom.segment_size_mm   # the grid's tile = one printed segment
 
     factor, dia_info = resolve_expansion_factor(
         diameter, Path(config.paths.packing), config.geom.tile_size_mm,
@@ -343,8 +378,16 @@ def run_facility(
         "generator": f"rcps-facility {__version__}",
         "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "grid": list(g),
-        "tile_size_mm": list(config.geom.tile_size_mm),
-        "facility_size_mm": [g[ax] * config.geom.tile_size_mm[ax] for ax in range(3)],
+        "tile_size_mm": list(seg),
+        "facility_size_mm": [g[ax] * seg[ax] for ax in range(3)],
+        "packing_period_mm": list(config.geom.tile_size_mm),
+        "geometry": {
+            "shape": config.geom.shape,
+            "cylinder_diameter_mm": (config.geom.effective_cylinder_diameter_mm
+                                     if config.geom.shape == "cylinder" else None),
+            "flow_axis": config.geom.flow_axis,
+            "segment_periods": config.geom.segment_periods,
+        },
         "diameter": dia_info,
         "dry_run": dry_run,
         "n_tiles": n_tiles,
@@ -357,7 +400,7 @@ def run_facility(
     # human-readable layout, one block per z-layer, y rows top-down
     lines = [
         f"rcps-facility assembly map ({g[0]}x{g[1]}x{g[2]} tiles, "
-        f"tile {config.geom.tile_size_mm} mm)",
+        f"tile {seg} mm)",
         f"diameter mode: {dia_info['mode']} -> factor {factor:.6g}, "
         f"printed d = {dia_info['mean_printed_diameter_mm']:.4f} mm, "
         f"phi = {dia_info['phi_realized']:.4f}",
@@ -369,12 +412,28 @@ def run_facility(
         lines.append(
             f"  {e['tag']:>14s}  x{e['copies']:<3d} keep={','.join(e['keep_sides']) or '-':<14s} {mesh}"
         )
-    for k in range(g[2]):
-        lines += ["", f"Layer z={k} (rows: y from top={g[1]-1} to 0; cols: x from 0 to {g[0]-1}):"]
-        for j in reversed(range(g[1])):
-            lines.append("  " + " | ".join(
-                f"{tag_by_pos[(i, j, k)]:>14s}" for i in range(g[0])
-            ))
+    if config.geom.shape == "cylinder":
+        D = config.geom.effective_cylinder_diameter_mm
+        lines += [
+            "",
+            f"Column: {g[2]} segment(s) of {seg[2]:g} mm, D = {D:g} mm, "
+            f"total {g[2] * seg[2]:g} mm. Segment axis = packing "
+            f"{config.geom.flow_axis.upper()} axis (mesh z).",
+            "Order from z = 0 (inlet end) upwards:",
+        ]
+        for k in range(g[2]):
+            tag = tag_by_pos[(0, 0, k)]
+            ks = next(tuple(e["keep_sides"]) for e in entries if e["tag"] == tag)
+            lines.append(f"  {k + 1:>3d}  z = {k * seg[2]:>7g} mm  "
+                         f"{_COLUMN_ROLE.get(ks, '?'):>6s}  {tag}")
+    else:
+        for k in range(g[2]):
+            lines += ["", f"Layer z={k} (rows: y from top={g[1]-1} to 0; "
+                          f"cols: x from 0 to {g[0]-1}):"]
+            for j in reversed(range(g[1])):
+                lines.append("  " + " | ".join(
+                    f"{tag_by_pos[(i, j, k)]:>14s}" for i in range(g[0])
+                ))
     lines += [
         "",
         "Assembly rule: place each tile at position (i,j,k)*tile_size; kept",

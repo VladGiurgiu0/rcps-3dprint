@@ -113,12 +113,13 @@ function makeViewer(el) {
   };
 }
 
-function addBoxOutline(viewer, box) {
+function addBoxOutline(viewer, box, center) {
   const g = new THREE.BoxGeometry(box[0], box[1], box[2]);
   const edges = new THREE.EdgesGeometry(g);
   const line = new THREE.LineSegments(edges,
     new THREE.LineBasicMaterial({ color: 0x86868b }));
-  line.position.set(box[0] / 2, box[1] / 2, box[2] / 2);
+  const c = center || [box[0] / 2, box[1] / 2, box[2] / 2];
+  line.position.set(c[0], c[1], c[2]);
   viewer.scene.add(line);
 }
 
@@ -159,6 +160,7 @@ async function showMesh(el, jobId) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(V, 3));
   geo.setIndex(new THREE.BufferAttribute(F, 1));
+  geo.rotateX(-Math.PI / 2);          // mesh z (print / cylinder axis) points up
   geo.computeVertexNormals();
   const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
     color: 0xb8bcc4, roughness: 0.62, metalness: 0.12 }));
@@ -166,9 +168,10 @@ async function showMesh(el, jobId) {
   geo.computeBoundingBox();
   const bb = geo.boundingBox, c = new THREE.Vector3();
   bb.getCenter(c);
-  addBoxOutline(viewer, [bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z]);
+  addBoxOutline(viewer, [bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z],
+    [c.x, c.y, c.z]);
   viewer.setTarget([c.x, c.y, c.z],
-    Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y) * 2.4);
+    Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z) * 2.4);
 }
 
 /* ---------- Setup stage ---------- */
@@ -383,8 +386,38 @@ function renderPackMetrics(m) {
 function diameterChoice() {
   return document.querySelector("input[name=dia]:checked").value;
 }
+/* printed-piece geometry (rcps GeomConfig: shape, D, flow axis, segment) */
+const boxEdge = () => parseFloat($("p-box").value) || 50;
+const isCyl = () => $("m-shape").value === "cylinder";
+const segPeriods = () => Math.max(1, parseInt($("m-seg").value, 10) || 1);
+const segLen = () => segPeriods() * boxEdge();
+function cylDiameter() {           // null -> backend default (box edge)
+  const v = parseFloat($("m-cyl-d").value);
+  return isCyl() && isFinite(v) && v > 0 ? v : null;
+}
+function refreshSegOptions(keep) {
+  const sel = $("m-seg"), cur = keep || segPeriods();
+  sel.innerHTML = "";
+  for (let n = 1; n <= 4; n++) {
+    const o = document.createElement("option");
+    o.value = n; o.textContent = `${n * boxEdge()} mm` + (n === 1 ? " (one tile)" : "");
+    if (n === cur) o.selected = true;
+    sel.appendChild(o);
+  }
+}
+function updateGeomUI() {
+  $("m-cyl-d").disabled = !isCyl();
+  $("m-cyl-d").placeholder = `= ${boxEdge()} (box edge)`;
+  $("e-grid-wrap").classList.toggle("hidden", isCyl());
+  $("e-col-wrap").classList.toggle("hidden", !isCyl());
+  drawSchematic();
+}
 function meshParams() {
   return {
+    shape: $("m-shape").value,
+    cylinder_diameter_mm: cylDiameter(),
+    flow_axis: $("m-axis").value,
+    segment_periods: segPeriods(),
     export_what: $("m-what").value,
     bridge_mode: $("m-bridge").value,
     radius_frac: parseFloat($("m-rf").value),
@@ -411,6 +444,9 @@ $("btn-mesh").onclick = async () => {
         await refreshStatus();
         const r = jj.result;
         $("mesh-summary").innerHTML =
+          (r.shape === "cylinder"
+            ? `cylinder Ø <b>${r.cylinder_diameter_mm} mm</b> × ${r.segment_size_mm[2]} mm · `
+            : "") +
           `${(r.n_faces / 1e6).toFixed(2)} M triangles · φ = <b>${r.porosity.toFixed(4)}</b>` +
           ` · printed d = <b>${r.diameter.mean_printed_diameter_mm} mm</b>` +
           (r.surface_area_mm2 ? ` · surface <b>${(r.surface_area_mm2 / 100).toFixed(1)} cm²</b>` +
@@ -442,24 +478,32 @@ function contactsLine(c) {
 
 /* ---------- Export stage: schematic + estimate ---------- */
 function gridVals() {
+  if (isCyl()) return [1, 1, columnSegments()];
   return [$("e-gx"), $("e-gy"), $("e-gz")].map((x) =>
     Math.max(1, parseInt(x.value, 10) || 1));
+}
+function columnSegments() {         // K; NaN when not a whole multiple
+  const k = parseFloat($("e-col").value) / segLen();
+  return Math.abs(k - Math.round(k)) < 1e-6 && k >= 1 ? Math.round(k) : NaN;
 }
 function uniqueTypes(g) {
   const cls = (N) => (N === 1 ? 1 : N === 2 ? 2 : 3);
   return cls(g[0]) * cls(g[1]) * cls(g[2]);
 }
-function schematicView(nA, nB, L, labelA, labelB, title) {
-  // generic 2D grid view: nA cells along the horizontal axis, nB vertical
-  const fa = nA * L, fb = nB * L;
+function schematicView(nA, nB, L, labelA, labelB, title, Lb = L, round = false) {
+  // generic 2D grid view: nA cells (width L) horizontally, nB (height Lb) vertically
+  const fa = nA * L, fb = nB * Lb;
   const pad = 34;
   const scale = Math.min((260 - pad) / fa, (150 - pad) / fb);
   const w = fa * scale, h = fb * scale;
   let cells = "";
   for (let i = 0; i < nA; i++)
     for (let j = 0; j < nB; j++)
-      cells += `<rect x="${pad + i * L * scale}" y="${pad + (nB - 1 - j) * L * scale}"
-        width="${L * scale}" height="${L * scale}" class="sch-cell"/>`;
+      cells += round
+        ? `<circle cx="${pad + (i + 0.5) * L * scale}" cy="${pad + (nB - 0.5 - j) * Lb * scale}"
+            r="${0.5 * L * scale}" class="sch-cell"/>`
+        : `<rect x="${pad + i * L * scale}" y="${pad + (nB - 1 - j) * Lb * scale}"
+            width="${L * scale}" height="${Lb * scale}" class="sch-cell"/>`;
   return `
   <svg viewBox="0 0 300 200" xmlns="http://www.w3.org/2000/svg">
     ${cells}
@@ -473,12 +517,32 @@ function schematicView(nA, nB, L, labelA, labelB, title) {
 }
 
 function drawSchematic() {
+  if (isCyl()) {
+    const K = columnSegments(), S = segLen();
+    const D = cylDiameter() || boxEdge();
+    if (!isFinite(K)) {
+      $("e-schematic").innerHTML = "";
+      $("e-estimate").innerHTML = `<span class="err">column length must be a whole ` +
+        `multiple of the segment length (${S} mm)</span>`;
+      return;
+    }
+    $("e-schematic").innerHTML =
+      schematicView(1, 1, D, "D", "D", "cross-section", D, true) +
+      schematicView(1, K, D, "D", `axis (packing ${$("m-axis").value})`,
+                    "side view (segments)", S);
+    const t = K === 1 ? 1 : K === 2 ? 2 : 3;
+    $("e-estimate").textContent =
+      `${K} segment(s) of ${S} mm → ${t} unique mesh(es) to print · column ` +
+      `${K * S} mm, Ø ${D} mm. Dry run is instant and writes the assembly plan.`;
+    return;
+  }
   const g = gridVals();
   const L = parseFloat($("p-box").value) || 50;
-  const fx = g[0] * L, fy = g[1] * L, fz = g[2] * L;
+  const Lz = segLen();
+  const fx = g[0] * L, fy = g[1] * L, fz = g[2] * Lz;
   $("e-schematic").innerHTML =
     schematicView(g[0], g[1], L, "x", "y", "top view (x–y)") +
-    schematicView(g[0], g[2], L, "x", "z", "side view (x–z)");
+    schematicView(g[0], g[2], L, "x", "z", "side view (x–z)", Lz);
 
   const n = g[0] * g[1] * g[2];
   const t = n === 1 ? 1 : uniqueTypes(g);
@@ -486,8 +550,11 @@ function drawSchematic() {
     `${n} tile(s) → ${t} unique mesh(es) to print · facility ` +
     `${fx} × ${fy} × ${fz} mm. Dry run is instant and writes the assembly plan.`;
 }
-["e-gx", "e-gy", "e-gz", "e-vox", "p-box"].forEach((id) =>
+["e-gx", "e-gy", "e-gz", "e-vox", "p-box", "e-col", "m-cyl-d"].forEach((id) =>
   $(id).addEventListener("input", drawSchematic));
+["m-shape", "m-seg", "m-axis"].forEach((id) =>
+  $(id).addEventListener("change", updateGeomUI));
+$("p-box").addEventListener("input", () => refreshSegOptions());
 
 /* ---------- SDF slicer ---------- */
 const sdf = { job: null, meta: null, axis: 2, index: 0 };
@@ -616,9 +683,13 @@ document.querySelectorAll("#s-axis button").forEach((b) =>
 
 async function runExport(dry) {
   try {
+    if (isCyl() && !isFinite(columnSegments()))
+      throw new Error(`column length must be a whole multiple of the segment ` +
+                      `length (${segLen()} mm)`);
     const j = await api.post("/api/export/run", {
       vox_mm: parseFloat($("e-vox").value),
       grid: gridVals(),
+      column_length_mm: parseFloat($("e-col").value),
       export_format: $("e-format").value,
       ...meshParams(),
       dry_run: dry,
@@ -643,10 +714,11 @@ async function runExport(dry) {
   } catch (e) { alertErr(e.message); }
 }
 $("btn-export").onclick = () => {
-  const g = gridVals().join("·");
+  const g = isCyl() ? `column ${columnSegments()} × ${segLen()} mm`
+                    : gridVals().join("·") + " grid";
   const fmt = { "3mf": ".3mf", stl: ".stl", both: ".3mf + .stl" }[$("e-format").value]
     || ".3mf";
-  if (confirm(`Start full-resolution export (${g} grid, ${fmt})? This is a long run.`))
+  if (confirm(`Start full-resolution export (${g}, ${fmt})? This is a long run.`))
     runExport(false);
 };
 $("btn-export-dry").onclick = () => runExport(true);
@@ -667,10 +739,30 @@ $("btn-export-dry").onclick = () => runExport(true);
     const mp = s.mesh_params || {};
     if (mp.backend) $("m-backend").value = mp.backend;
     if (mp.contact_tol_mm != null) $("m-ctol").value = mp.contact_tol_mm;
+    // restore the settings that define the printed medium, so a reload
+    // cannot silently fall back to defaults (e.g. bridge radius 0.15)
+    if (mp.radius_frac != null) $("m-rf").value = mp.radius_frac;
+    if (mp.bridge_mode) $("m-bridge").value = mp.bridge_mode;
+    if (mp.export_what) $("m-what").value = mp.export_what;
+    if (mp.vox_mm != null) $("m-vox").value = mp.vox_mm;
+    if (mp.shape) $("m-shape").value = mp.shape;
+    if (mp.flow_axis) $("m-axis").value = mp.flow_axis;
+    if (mp.cylinder_diameter_mm) $("m-cyl-d").value = mp.cylinder_diameter_mm;
+    if (mp.diameter) {
+      const r = document.querySelector(`input[name=dia][value=${mp.diameter}]`);
+      if (r) r.checked = true;          // refreshPackPreview resets it if unavailable
+    }
+    const i2m = mp.iso2mesh || {};
+    if (i2m.angbound_deg != null) $("a-ang").value = i2m.angbound_deg;
+    if (i2m.radbound != null) $("a-rad").value = i2m.radbound;
+    if (i2m.distbound != null) $("a-dist").value = i2m.distbound;
+    if (i2m.maxnode != null) $("a-maxn").value = i2m.maxnode;
+    refreshSegOptions(mp.segment_periods || 1);
     const ep = s.export_params || {};
     if (ep.export_format) $("e-format").value = ep.export_format;
+    if (ep.column_length_mm) $("e-col").value = ep.column_length_mm;
     updateN();
-    drawSchematic();
+    updateGeomUI();
     await refreshStatus();
     if (s.packing_exists) {
       window.addEventListener("three-ready", refreshPackPreview, { once: true });

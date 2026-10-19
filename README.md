@@ -41,8 +41,8 @@ see [References](#references).
   existing executable, load an existing `packing.xyzd`, or use Google Colab) →
   **Pack** (simulate; live 3D preview) → **Mesh** (fast coarse preview,
   porosity, watertightness and contacts-per-sphere readout) → **Export**
-  (production `.3mf` and/or `.stl`, single tile or interlocking facility
-  with an assembly map). Fully on-device; every packing gets its own
+  (production `.3mf` and/or `.stl`, single tile, interlocking facility, or
+  a column of round segments for a pipe, with an assembly map). Fully on-device; every packing gets its own
   `output/run_*/` folder.
 - **`rcps-build`** — single-tile CLI: YAML config in, `.3mf` + sidecars out.
 - **`rcps-facility`** — multi-tile orchestrator: derives the unique tile
@@ -159,6 +159,18 @@ mechanically, because the packing is periodic. `rcps-facility` automates
 this: interior faces kept, exterior faces cut flush, one mesh per *unique*
 tile type, plus a human-readable assembly map (which mesh at which grid
 position, copy counts).
+
+**Cylinders and columns (round pipes).** With `geom.shape: cylinder` the tile
+box is replaced by an exact capped-cylinder SDF (diameter
+`geom.cylinder_diameter_mm`, default = tile cross-section), so the wall cut
+again runs through the beads and the cut-surface porosity equals the bulk
+porosity (Delesse's principle; verified in `tests/test_field.py`:
+|φ_cylinder − φ_box| < 0.01 for all three axes). `geom.flow_axis` selects
+which packing axis becomes the cylinder axis (a cyclic axis relabeling,
+i.e. a rotation, never a mirror image), and `geom.segment_periods` sets the
+printed segment length in packing periods (the stacked segment is still
+exactly periodic). Only the end caps interlock, so a column of K segments
+(`--grid 1 1 K`) needs at most three meshes: bottom, middle, top.
 
 ### 5. Meshing, repair, output
 
