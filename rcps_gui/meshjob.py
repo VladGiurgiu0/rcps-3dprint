@@ -10,6 +10,10 @@ import numpy as np
 
 from rcps_gui.jobs import Job
 
+# Export sub-folder of a run, per printed shape. Runs exported before this
+# split keep their legacy ``export/`` folder (read for status only).
+EXPORT_DIRS = {"box": "export_box", "cylinder": "export_cylindrical"}
+
 
 def _have(mod: str) -> bool:
     try:
@@ -320,8 +324,10 @@ def export_job(job: Job, packing: str | Path, out_dir: str | Path,
     from rcps.config import RcpsConfig
 
     packing = Path(packing)
-    out = Path(out_dir) / "export"
     p = dict(params)
+    # one export folder per shape, so a cylinder column never overwrites
+    # the box facility of the same run (and vice versa)
+    out = Path(out_dir) / EXPORT_DIRS.get(p.get("shape") or "box", "export_box")
     p.setdefault("vox_mm", 0.1)
     if p.get("dry_run") and p.get("backend") in (None, "auto"):
         # a dry run never meshes — don't require a meshing backend
@@ -347,6 +353,7 @@ def export_job(job: Job, packing: str | Path, out_dir: str | Path,
         job.result = {
             "files": {k: str(v) for k, v in written.items()},
             "diameter": dia_info,
+            "out_dir": str(out),
         }
     else:
         from rcps.facility import run_facility
@@ -365,4 +372,5 @@ def export_job(job: Job, packing: str | Path, out_dir: str | Path,
             "n_types": res["n_types"],
             "n_tiles": res["n_tiles"],
             "diameter": dia_info,
+            "out_dir": str(out),
         }

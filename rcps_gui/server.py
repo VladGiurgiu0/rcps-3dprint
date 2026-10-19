@@ -126,14 +126,23 @@ class AppState:
         cr = self.current_run_path
         if cr is None or not cr.exists():
             return {"pack": False, "mesh": False, "export": False}
+        def _exported(d: Path) -> bool:
+            return d.exists() and (any(d.rglob("*.3mf")) or any(d.rglob("*.stl"))
+                                   or (d / "facility_map.json").exists())
+
         return {
             "pack": (cr / "packing.xyzd").exists(),
             "mesh": any((cr / "preview").glob("*.3mf")) if (cr / "preview").exists() else False,
-            "export": (any((cr / "export").rglob("*.3mf"))
-                       or any((cr / "export").rglob("*.stl"))
-                       or (cr / "export" / "facility_map.json").exists())
-                      if (cr / "export").exists() else False,
+            # export_box / export_cylindrical, plus the legacy export/ folder
+            "export": any(_exported(cr / n) for n in
+                          ("export", *meshjob.EXPORT_DIRS.values())),
         }
+
+
+# Mesh-stage settings persisted in the GUI state (they define the printed medium).
+MESH_KEYS = ("vox_mm", "bridge_mode", "radius_frac", "export_what", "diameter",
+             "backend", "iso2mesh", "contact_tol_mm", "shape",
+             "cylinder_diameter_mm", "flow_axis", "segment_periods")
 
 
 def make_handler(state: AppState):  # noqa: C901 — routing table
@@ -294,12 +303,7 @@ def make_handler(state: AppState):  # noqa: C901 — routing table
                     params["box_mm"] = state.data["pack_params"]["box_mm"]
                     params["d_nominal_mm"] = state.data["pack_params"]["d_nominal_mm"]
                     state.data["mesh_params"] = {
-                        k: params[k] for k in
-                        ("vox_mm", "bridge_mode", "radius_frac",
-                         "export_what", "diameter", "backend", "iso2mesh",
-                         "contact_tol_mm", "shape", "cylinder_diameter_mm",
-                         "flow_axis", "segment_periods")
-                        if k in params}
+                        k: params[k] for k in MESH_KEYS if k in params}
                     state.save()
                     packing = state.packing_path
 
@@ -340,6 +344,10 @@ def make_handler(state: AppState):  # noqa: C901 — routing table
                               **state.data["export_params"], **body}
                     params["box_mm"] = state.data["pack_params"]["box_mm"]
                     params["d_nominal_mm"] = state.data["pack_params"]["d_nominal_mm"]
+                    # the export also fixes the medium: remember its
+                    # Mesh-stage settings (preview voxel excluded)
+                    state.data["mesh_params"].update(
+                        {k: body[k] for k in MESH_KEYS if k in body and k != "vox_mm"})
                     state.data["export_params"] = {
                         "vox_mm": params["vox_mm"], "grid": params["grid"],
                         "export_format": params.get("export_format", "3mf"),

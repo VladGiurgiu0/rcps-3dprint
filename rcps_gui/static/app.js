@@ -528,12 +528,13 @@ function drawSchematic() {
     }
     $("e-schematic").innerHTML =
       schematicView(1, 1, D, "D", "D", "cross-section", D, true) +
-      schematicView(1, K, D, "D", `axis (packing ${$("m-axis").value})`,
-                    "side view (segments)", S);
+      schematicView(K, 1, S, `axis (packing ${$("m-axis").value})`, "D",
+                    "side view (segments, inlet left)", D);
     const t = K === 1 ? 1 : K === 2 ? 2 : 3;
     $("e-estimate").textContent =
       `${K} segment(s) of ${S} mm → ${t} unique mesh(es) to print · column ` +
-      `${K * S} mm, Ø ${D} mm. Dry run is instant and writes the assembly plan.`;
+      `${K * S} mm, Ø ${D} mm → run folder export_cylindrical/. ` +
+      `Dry run is instant and writes the assembly plan.`;
     return;
   }
   const g = gridVals();
@@ -548,7 +549,8 @@ function drawSchematic() {
   const t = n === 1 ? 1 : uniqueTypes(g);
   $("e-estimate").textContent =
     `${n} tile(s) → ${t} unique mesh(es) to print · facility ` +
-    `${fx} × ${fy} × ${fz} mm. Dry run is instant and writes the assembly plan.`;
+    `${fx} × ${fy} × ${fz} mm → run folder export_box/. ` +
+    `Dry run is instant and writes the assembly plan.`;
 }
 ["e-gx", "e-gy", "e-gz", "e-vox", "p-box", "e-col", "m-cyl-d"].forEach((id) =>
   $(id).addEventListener("input", drawSchematic));

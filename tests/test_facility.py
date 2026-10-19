@@ -290,6 +290,34 @@ class TestColumnDryRun:
         assert amap["packing_period_mm"] == [50.0, 50.0, 50.0]
         assert amap["geometry"]["cylinder_diameter_mm"] == 49.8
 
+    def test_other_plan_in_folder_is_never_overwritten(self, packing_xyzd_path, tmp_path):
+        box = _base_config(packing_xyzd_path, tmp_path)
+        cyl = _base_config(packing_xyzd_path, tmp_path, shape="cylinder")
+        out = tmp_path / "exp"
+        res = run_facility(box, (4, 1, 4), diameter="stored", out_dir=out, dry_run=True)
+        before = res["map_json"].read_text()
+        run_facility(box, (4, 1, 4), diameter="stored", out_dir=out, dry_run=True)  # same plan ok
+        for cfg, grid in [(cyl, (1, 1, 20)), (box, (2, 2, 1))]:
+            with pytest.raises(FileExistsError, match="different plan"):
+                run_facility(cfg, grid, diameter="stored", out_dir=out, dry_run=True)
+        assert res["map_json"].read_text() == before
+
+    def test_legacy_map_without_geometry_counts_as_box(self, tmp_path):
+        import json
+
+        from rcps.facility import check_no_other_plan
+
+        legacy = {"grid": [4, 1, 4], "tile_size_mm": [50.0, 50.0, 50.0],
+                  "diameter": {"expansion_factor": 1.0}}       # Sep 2026 map format
+        (tmp_path / "facility_map.json").write_text(json.dumps(legacy))
+        check_no_other_plan(tmp_path, {**legacy, "geometry": {
+            "shape": "box", "cylinder_diameter_mm": None, "flow_axis": "z",
+            "segment_periods": 1}})                                # same plan: fine
+        with pytest.raises(FileExistsError):
+            check_no_other_plan(tmp_path, {**legacy, "grid": [1, 1, 20], "geometry": {
+                "shape": "cylinder", "cylinder_diameter_mm": 50.0, "flow_axis": "z",
+                "segment_periods": 1}})
+
     def test_cylinder_rejects_lateral_grid(self, packing_xyzd_path, tmp_path):
         cfg = _base_config(packing_xyzd_path, tmp_path, shape="cylinder")
         with pytest.raises(ValueError):

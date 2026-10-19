@@ -151,6 +151,45 @@ def column_segments(column_length_mm: float, segment_length_mm: float) -> int:
 
 _COLUMN_ROLE = {("S",): "bottom", ("I", "S"): "middle", ("I",): "top", (): "single"}
 
+_DEFAULT_GEOMETRY = {"shape": "box", "cylinder_diameter_mm": None,
+                     "flow_axis": "z", "segment_periods": 1}
+
+
+def _plan_signature(amap: dict[str, Any]) -> dict[str, Any]:
+    """What makes two assembly maps the same plan (maps written before the
+    cylinder feature have no ``geometry`` key: they are box / z / 1 period)."""
+    return {
+        "grid": [int(x) for x in amap.get("grid", [])],
+        "tile_size_mm": [round(float(x), 6) for x in amap.get("tile_size_mm", [])],
+        "geometry": amap.get("geometry", _DEFAULT_GEOMETRY),
+        "expansion_factor": round(float(amap.get("diameter", {}).get("expansion_factor", 1.0)), 6),
+    }
+
+
+def check_no_other_plan(out_dir: Path, amap: dict[str, Any]) -> None:
+    """Refuse to overwrite an assembly map (and its meshes) of a *different* plan.
+
+    Re-running the same plan (e.g. a dry run followed by the real export)
+    is allowed; anything else must go to another folder.
+    """
+    f = Path(out_dir) / "facility_map.json"
+    if not f.exists():
+        return
+    try:
+        old = json.loads(f.read_text())
+    except (json.JSONDecodeError, OSError):
+        return
+    a, b = _plan_signature(old), _plan_signature(amap)
+    if a != b:
+        g = a["geometry"]
+        what = (f"{g['shape']}, grid {a['grid']}, tile {a['tile_size_mm']} mm, "
+                f"flow axis {g['flow_axis']}, expansion x{a['expansion_factor']}")
+        raise FileExistsError(
+            f"{Path(out_dir).name}/ already holds a different plan ({what}). "
+            f"Move or rename that folder first so its map and meshes are not "
+            f"overwritten, then export again."
+        )
+
 
 # =====================================================================
 # Diameter convention
@@ -326,6 +365,18 @@ def run_facility(
     if out_dir is None:
         out_dir = Path(config.paths.out_dir) / f"facility_{g[0]}x{g[1]}x{g[2]}"
     out_dir = Path(out_dir)
+    check_no_other_plan(out_dir, {
+        "grid": list(g),
+        "tile_size_mm": list(seg),
+        "geometry": {
+            "shape": config.geom.shape,
+            "cylinder_diameter_mm": (config.geom.effective_cylinder_diameter_mm
+                                     if config.geom.shape == "cylinder" else None),
+            "flow_axis": config.geom.flow_axis,
+            "segment_periods": config.geom.segment_periods,
+        },
+        "diameter": {"expansion_factor": factor},
+    })
     out_dir.mkdir(parents=True, exist_ok=True)
 
     log.info(

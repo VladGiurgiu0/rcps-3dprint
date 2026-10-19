@@ -222,6 +222,19 @@ class TestApiSmoke:
         assert j["result"]["n_types"] == 3 and j["result"]["n_tiles"] == 20
         assert "packing X axis" in Path(j["result"]["map_txt"]).read_text()
         assert state.data["export_params"]["column_length_mm"] == 1000
+        # shapes export to separate run sub-folders: box map stays untouched
+        assert Path(j["result"]["map_txt"]).parent.name == "export_cylindrical"
+        job = _post(f"{base}/api/export/run",
+                    {"grid": [4, 1, 4], "diameter": "stored", "dry_run": True,
+                     "vox_mm": 0.1, "shape": "box"})
+        for _ in range(200):
+            jb = _get(f"{base}/api/job/{job['id']}")
+            if jb["status"] in ("done", "error"):
+                break
+            time.sleep(0.05)
+        assert jb["status"] == "done", jb.get("error")
+        assert Path(jb["result"]["map_txt"]).parent.name == "export_box"
+        assert "packing X axis" in Path(j["result"]["map_txt"]).read_text()
 
     def test_unknown_job_404(self, gui_server):
         base, _ = gui_server

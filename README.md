@@ -77,6 +77,16 @@ the GUI applies an SDK fallback automatically and tells you in the log).
 
 ## Quick start
 
+**Double-click start (no terminal):** in the repo folder, double-click
+`Start RCPS GUI.command` (macOS) or `Start RCPS GUI.bat` (Windows). It uses
+`.venv` in the folder or the conda environment `rcps`, offers to create it and
+install everything on first use, and opens the GUI in your browser. Keep its
+window open while you work; closing it stops the GUI. If the repo was
+downloaded as a ZIP, the system may block the file once (macOS: System
+Settings › Privacy & Security › Open Anyway; Windows: More info › Run anyway).
+
+From an activated environment instead:
+
 ```bash
 rcps-gui                      # opens http://127.0.0.1:8421 in your browser
 ```
